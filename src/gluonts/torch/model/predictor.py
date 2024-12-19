@@ -28,7 +28,7 @@ from gluonts.model.forecast_generator import (
     to_numpy,
 )
 from gluonts.model.predictor import OutputTransform, RepresentablePredictor
-from gluonts.torch.batchify import batchify
+from gluonts.torch.batchify import batchify, multidataset_batchify
 from gluonts.torch.util import resolve_device
 from gluonts.transform import SelectFields, Transformation
 
@@ -72,8 +72,10 @@ class PyTorchPredictor(RepresentablePredictor):
         return self.prediction_net
 
     def predict(  # type: ignore
-        self, dataset: Dataset, num_samples: Optional[int] = None
+        self, dataset: Dataset, num_samples: Optional[int] = None, **kwargs
     ) -> Iterator[Forecast]:
+        # CHANGE througout TODO QUESTION is there a better way to do this
+
         inference_data_loader = InferenceDataLoader(
             dataset,
             transform=self.input_transform
@@ -81,8 +83,14 @@ class PyTorchPredictor(RepresentablePredictor):
                 self.input_names + self.required_fields, allow_missing=True
             ),
             batch_size=self.batch_size,
-            stack_fn=lambda data: batchify(data, self.device),
+            # stack_fn=lambda data: (multidataset_batchify(data, self.device) if len(dataset.test_data.dataset) > 1 else batchify(data, self.device))
+            stack_fn=lambda data:  batchify(data, self.device)
+            # stack_fn=(lambda data: batchify(data, self.device)) if len(dataset.test_data.dataset) == 1 else (lambda data: {k: torch.unsqueeze(v, 0) for k, v in batchify(data, self.device).items()}),
         )
+        # from gluonts.transform.convert import ExpandDimArray
+        # if len(dataset.test_data.dataset) > 1:
+        #     # if there are multiple continuity groups in the test data
+        #     inference_data_loader.transformation += ExpandDimArray(axis=0)
 
         self.prediction_net.eval()
 
@@ -93,6 +101,7 @@ class PyTorchPredictor(RepresentablePredictor):
                 input_names=self.input_names,
                 output_transform=self.output_transform,
                 num_samples=num_samples,
+                **kwargs
             )
 
     def serialize(self, path: Path) -> None:

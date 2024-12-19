@@ -73,6 +73,7 @@ class MultivariateGrouper:
         num_test_dates: Optional[int] = None,
         train_fill_rule: Callable = np.mean,
         test_fill_rule: Callable = lambda x: 0.0,
+        split_on: Optional[str] = None
     ) -> None:
         self.num_test_dates = num_test_dates
         self.max_target_dimension = max_target_dim
@@ -82,8 +83,10 @@ class MultivariateGrouper:
         self.first_timestamp = None
         self.last_timestamp = None
         self.frequency = ""
+        self.split_on = split_on
 
     def __call__(self, dataset: Dataset) -> Dataset:
+        self.split_on_idx = list(dataset._static_cats.index).index(self.split_on) if self.split_on else None # index in feat_static_cat
         self._preprocess(dataset)
         return self._group_all(dataset)
 
@@ -93,27 +96,54 @@ class MultivariateGrouper:
         is necessary for alignment.
 
         This includes:
-             1. Storing first/last timestamp in the dataset
+             1. Storing first/last timestamps in the dataset (one set for each continuity group if self.split_on is not None)
              2. Storing the frequency of the dataset
         """
-        for data in dataset:
-            timestamp = data[FieldName.START]
+        if self.split_on:
+            for data in dataset:
+                # split_on_val = dataset._static_cats.loc[self.split_on, :]
+                split_on_val = data["feat_static_cat"][self.split_on_idx]
+                timestamp = data[FieldName.START]
 
-            if self.first_timestamp is None:
-                self.first_timestamp = timestamp
+                if self.first_timestamp is None:
+                    self.first_timestamp = {}
+                if split_on_val not in self.first_timestamp:
+                    self.first_timestamp[split_on_val] = timestamp
 
-            if self.last_timestamp is None:
-                self.last_timestamp = timestamp
+                if self.last_timestamp is None:
+                    self.last_timestamp = {}
+                if split_on_val not in self.last_timestamp:
+                    self.last_timestamp[split_on_val] = timestamp
 
-            assert self.first_timestamp is not None
-            assert self.last_timestamp is not None
+                assert self.first_timestamp is not None
+                assert self.last_timestamp is not None
 
-            self.first_timestamp = min(self.first_timestamp, timestamp)
-            self.last_timestamp = max(
-                self.last_timestamp,
-                timestamp + len(data[FieldName.TARGET]) - 1,
-            )
-            self.frequency = timestamp.freq
+                self.first_timestamp[split_on_val] = min(self.first_timestamp[split_on_val], timestamp)
+                self.last_timestamp[split_on_val] = max(
+                    self.last_timestamp[split_on_val],
+                    timestamp + len(data[FieldName.TARGET]) - 1,
+                )
+                self.frequency = timestamp.freq # TODO add check to make sure frequency is uniform across 
+            
+        else:
+            for data in dataset:
+                timestamp = data[FieldName.START]
+
+                if self.first_timestamp is None:
+                    self.first_timestamp = timestamp
+
+                if self.last_timestamp is None:
+                    self.last_timestamp = timestamp
+
+                assert self.first_timestamp is not None
+                assert self.last_timestamp is not None
+
+                self.first_timestamp = min(self.first_timestamp, timestamp)
+                self.last_timestamp = max(
+                    self.last_timestamp,
+                    timestamp + len(data[FieldName.TARGET]) - 1,
+                )
+                self.frequency = timestamp.freq
 
         logging.info(
             "first/last timestamp found: "
@@ -130,45 +160,38 @@ class MultivariateGrouper:
     def _prepare_train_data(self, dataset: Dataset) -> Dataset:
         logging.info("group training time series to datasets")
 
-        # Creates a single multivariate time series from the
-        # univariate series in the dataset
-        grouped_data = self._transform_target(self._align_data_entry, dataset)
-        grouped_data[FieldName.TARGET] = np.vstack(
-            grouped_data[FieldName.TARGET]
-        )
-
-        fields = next(iter(dataset), {}).keys()
-        if FieldName.FEAT_DYNAMIC_REAL in fields:
-            grouped_data[FieldName.FEAT_DYNAMIC_REAL] = np.vstack(
-                [data[FieldName.FEAT_DYNAMIC_REAL] for data in dataset],
+        if self.split_on:
+            # Creates a single multivariate time series from the
+            # univariate series in the dataset
+            grouped_data = list()
+            fields = next(iter(dataset), {}).keys()
+            for split_on_val in range(int(dataset.static_cardinalities[self.split_on_idx])):
+                grouped_data.append(self._transform_target(self._align_data_entry, (data for data in dataset if data["feat_static_cat"][self.split_on_idx] == split_on_val)))
+                grouped_data[-1][FieldName.TARGET] = np.vstack(
+                    grouped_data[-1][FieldName.TARGET]
+                )
+                
+                if FieldName.FEAT_DYNAMIC_REAL in fields:
+                    grouped_data[-1][FieldName.FEAT_DYNAMIC_REAL] = np.vstack(
+                        [data[FieldName.FEAT_DYNAMIC_REAL] for data in dataset if data["feat_static_cat"][self.split_on_idx] == split_on_val],
+                    )
+                grouped_data[-1] = self._restrict_max_dimensionality(grouped_data[-1])
+                grouped_data[-1][FieldName.START] = self.first_timestamp[split_on_val]
+                grouped_data[-1][FieldName.FEAT_STATIC_CAT] = [0] 
+            
+            return ListDataset(
+                grouped_data, freq=self.frequency, one_dim_target=False
             )
-        grouped_data = self._restrict_max_dimensionality(grouped_data)
-        grouped_data[FieldName.START] = self.first_timestamp
-        grouped_data[FieldName.FEAT_STATIC_CAT] = [0]
+        else:
+            # Creates a single multivariate time series from the
+            # univariate series in the dataset
+            grouped_data = self._transform_target(self._align_data_entry, dataset)
+            grouped_data[FieldName.TARGET] = np.vstack(
+                grouped_data[FieldName.TARGET]
+            )
 
-        return ListDataset(
-            [grouped_data], freq=self.frequency, one_dim_target=False
-        )
-
-    def _prepare_test_data(self, dataset: Dataset) -> Dataset:
-        assert self.num_test_dates is not None
-
-        logging.info("group test time series to datasets")
-
-        grouped_data = self._transform_target(self._left_pad_data, dataset)
-
-        # Splits test dataset with rolling date into N R^d time series,
-        # where N is the number of rolling evaluation dates
-        assert len(grouped_data[FieldName.TARGET]) % self.num_test_dates == 0
-        split_size = len(grouped_data[FieldName.TARGET]) // self.num_test_dates
-        split_dataset = batcher(grouped_data[FieldName.TARGET], split_size)
-
-        fields = next(iter(dataset), {}).keys()
-        all_entries = list()
-        for dataset_at_test_date in split_dataset:
-            grouped_data = dict()
-            grouped_data[FieldName.TARGET] = np.vstack(dataset_at_test_date)
-
+            fields = next(iter(dataset), {}).keys()
+            
             if FieldName.FEAT_DYNAMIC_REAL in fields:
                 grouped_data[FieldName.FEAT_DYNAMIC_REAL] = np.vstack(
                     [data[FieldName.FEAT_DYNAMIC_REAL] for data in dataset],
@@ -176,33 +199,113 @@ class MultivariateGrouper:
             grouped_data = self._restrict_max_dimensionality(grouped_data)
             grouped_data[FieldName.START] = self.first_timestamp
             grouped_data[FieldName.FEAT_STATIC_CAT] = [0]
-            all_entries.append(grouped_data)
 
-        return ListDataset(
-            all_entries, freq=self.frequency, one_dim_target=False
-        )
+            return ListDataset(
+                [grouped_data], freq=self.frequency, one_dim_target=False
+            )
+
+    def _prepare_test_data(self, dataset: Dataset) -> Dataset:
+        assert self.num_test_dates is not None
+
+        logging.info("group test time series to datasets")
+
+        if self.split_on:
+            all_entries = list()
+            fields = next(iter(dataset), {}).keys()
+            for split_on_val in range(int(dataset.static_cardinalities[self.split_on_idx])):
+                grouped_data = self._transform_target(self._left_pad_data, (data for data in dataset if data["feat_static_cat"][self.split_on_idx] == split_on_val))
+
+                # Splits test dataset with rolling date into N R^d time series,
+                # where N is the number of rolling evaluation dates
+                assert len(grouped_data[FieldName.TARGET][0]) % self.num_test_dates == 0
+                split_size = len(grouped_data[FieldName.TARGET]) // self.num_test_dates
+                split_dataset = batcher(grouped_data[FieldName.TARGET], split_size)
+
+                for dataset_at_test_date in split_dataset:
+                    grouped_data = dict()
+                    grouped_data[FieldName.TARGET] = np.vstack(dataset_at_test_date)
+
+                    if FieldName.FEAT_DYNAMIC_REAL in fields:
+                        grouped_data[FieldName.FEAT_DYNAMIC_REAL] = np.vstack(
+                            [data[FieldName.FEAT_DYNAMIC_REAL] for data in dataset if data["feat_static_cat"][self.split_on_idx] == split_on_val],
+                        )
+                    grouped_data = self._restrict_max_dimensionality(grouped_data)
+                    grouped_data[FieldName.START] = self.first_timestamp[split_on_val]
+                    grouped_data[FieldName.FEAT_STATIC_CAT] = [0]
+                    all_entries.append(grouped_data)
+
+            return ListDataset(
+                all_entries, freq=self.frequency, one_dim_target=False
+            )
+        else:
+            grouped_data = self._transform_target(self._left_pad_data, dataset)
+
+            # Splits test dataset with rolling date into N R^d time series,
+            # where N is the number of rolling evaluation dates
+            assert len(grouped_data[FieldName.TARGET]) % self.num_test_dates == 0
+            split_size = len(grouped_data[FieldName.TARGET]) // self.num_test_dates
+            split_dataset = batcher(grouped_data[FieldName.TARGET], split_size)
+
+            fields = next(iter(dataset), {}).keys()
+            all_entries = list()
+            for dataset_at_test_date in split_dataset:
+                grouped_data = dict()
+                grouped_data[FieldName.TARGET] = np.vstack(dataset_at_test_date)
+
+                if FieldName.FEAT_DYNAMIC_REAL in fields:
+                    grouped_data[FieldName.FEAT_DYNAMIC_REAL] = np.vstack(
+                        [data[FieldName.FEAT_DYNAMIC_REAL] for data in dataset],
+                    )
+                grouped_data = self._restrict_max_dimensionality(grouped_data)
+                grouped_data[FieldName.START] = self.first_timestamp
+                grouped_data[FieldName.FEAT_STATIC_CAT] = [0]
+                all_entries.append(grouped_data)
+
+            return ListDataset(
+                all_entries, freq=self.frequency, one_dim_target=False
+            )
 
     def _align_data_entry(self, data: DataEntry) -> np.ndarray:
         ts = self.to_ts(data)
-        return ts.reindex(
-            pd.period_range(
-                start=self.first_timestamp,
-                end=self.last_timestamp,
-                freq=data[FieldName.START].freq,
-            ),
-            fill_value=self.train_fill_function(ts),
-        ).values
+        if self.split_on:
+            return ts.reindex(
+                pd.period_range(
+                    start=self.first_timestamp[data["feat_static_cat"][self.split_on_idx]],
+                    end=self.last_timestamp[data["feat_static_cat"][self.split_on_idx]],
+                    freq=data[FieldName.START].freq,
+                ),
+                fill_value=self.train_fill_function(ts),
+            ).values
+        else:
+            return ts.reindex(
+                pd.period_range(
+                    start=self.first_timestamp,
+                    end=self.last_timestamp,
+                    freq=data[FieldName.START].freq,
+                ),
+                fill_value=self.train_fill_function(ts),
+            ).values
 
     def _left_pad_data(self, data: DataEntry) -> np.ndarray:
         ts = self.to_ts(data)
-        return ts.reindex(
-            pd.period_range(
-                start=self.first_timestamp,
-                end=ts.index[-1],
-                freq=data[FieldName.START].freq,
-            ),
-            fill_value=self.test_fill_rule(ts),
-        ).values
+        if self.split_on:
+            return ts.reindex(
+                pd.period_range(
+                    start=self.first_timestamp[data["feat_static_cat"][self.split_on_idx]],
+                    end=ts.index[-1],
+                    freq=data[FieldName.START].freq,
+                ),
+                fill_value=self.test_fill_rule(ts),
+            ).values
+        else:
+            return ts.reindex(
+                pd.period_range(
+                    start=self.first_timestamp,
+                    end=ts.index[-1],
+                    freq=data[FieldName.START].freq,
+                ),
+                fill_value=self.test_fill_rule(ts),
+            ).values
 
     @staticmethod
     def _transform_target(funcs, dataset: Dataset) -> DataEntry:

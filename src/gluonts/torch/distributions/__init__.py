@@ -19,6 +19,7 @@ from .distribution_output import (
     DistributionOutput,
     GammaOutput,
     NormalOutput,
+    LowRankMultivariateNormalOutput,
     PoissonOutput,
     LaplaceOutput,
 )
@@ -56,6 +57,7 @@ __all__ = [
     "LaplaceOutput",
     "NegativeBinomialOutput",
     "NormalOutput",
+    "LowRankMultivariateNormalOutput",
     "Output",
     "PiecewiseLinear",
     "PiecewiseLinearOutput",

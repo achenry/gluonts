@@ -185,7 +185,7 @@ class FlatMapTransformation(Transformation):
         num_idle_transforms = 0
         for data_entry in data_it:
             num_idle_transforms += 1
-            for result in self.flatmap_transform(data_entry.copy(), is_train):
+            for result in self.flatmap_transform(data_entry.copy(), is_train): # new item_id for each result
                 num_idle_transforms = 0
                 yield result
 

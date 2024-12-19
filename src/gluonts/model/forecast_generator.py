@@ -82,7 +82,7 @@ def make_distribution_forecast(distr, *args, **kwargs) -> Forecast:
     raise NotImplementedError
 
 
-def make_predictions(prediction_net, inputs: dict):
+def make_predictions(prediction_net, inputs: dict, **kwargs): # CHANGE
     try:
         # Feed inputs as positional arguments for MXNet block predictors
         import mxnet as mx
@@ -91,7 +91,7 @@ def make_predictions(prediction_net, inputs: dict):
             return prediction_net(*inputs.values())
     except ImportError:
         pass
-    return prediction_net(**inputs)
+    return prediction_net(**inputs, **kwargs) # CHANGE
 
 
 class ForecastGenerator:
@@ -219,23 +219,23 @@ class DistributionForecastGenerator(ForecastGenerator):
         input_names: List[str],
         output_transform: Optional[OutputTransform],
         num_samples: Optional[int],
-        **kwargs,
+        output_distr_params: Optional[List[str]]
     ) -> Iterator[Forecast]:
         for batch in inference_data_loader:
             inputs = select(input_names, batch, ignore_missing=True)
-            outputs = make_predictions(prediction_net, inputs)
+            outputs = make_predictions(prediction_net, inputs, output_distr_params=output_distr_params) # calls forward in module.py CHANGE
 
             if output_transform:
                 log_once(OUTPUT_TRANSFORM_NOT_SUPPORTED_MSG)
             if num_samples:
                 log_once(NOT_SAMPLE_BASED_MSG)
-
+                
             distributions = [
-                self.distr_output.distribution(*u) for u in _unpack(outputs)
+                self.distr_output.distribution(distr_args=u) for u in _unpack(outputs) # CHANGE
             ]
 
             i = -1
-            for i, distr in enumerate(distributions):
+            for i, distr in enumerate(distributions): # loop over each forecasting starttime/item_id
                 yield make_distribution_forecast(
                     distr,
                     start_date=batch[FieldName.FORECAST_START][i],

@@ -15,7 +15,7 @@ from typing import NamedTuple, Optional, Iterable, Dict, Any
 import logging
 
 import numpy as np
-import lightning.pytorch as pl
+import pytorch_lightning as pl # CHANGE
 import torch.nn as nn
 
 from gluonts.core.component import validated
@@ -83,6 +83,7 @@ class PyTorchLightningEstimator(Estimator):
         self,
         transformation: Transformation,
         module,
+        **kwargs # CHANGE
     ) -> PyTorchPredictor:
         """
         Create and return a predictor object.
@@ -154,11 +155,12 @@ class PyTorchLightningEstimator(Estimator):
         **kwargs,
     ) -> TrainOutput:
         transformation = self.create_transformation()
-
+         
         with env._let(max_idle_transforms=max(len(training_data), 100)):
             transformed_training_data: Dataset = transformation.apply(
                 training_data, is_train=True
             )
+            # x = next(iter(transformed_training_data))
             if cache_data:
                 transformed_training_data = Cached(transformed_training_data)
 
@@ -227,7 +229,7 @@ class PyTorchLightningEstimator(Estimator):
             transformation=transformation,
             trained_net=best_model,
             trainer=trainer,
-            predictor=self.create_predictor(transformation, best_model),
+            predictor=self.create_predictor(transformation, best_model, **kwargs), # CHANGE
         )
 
     @staticmethod
@@ -249,6 +251,7 @@ class PyTorchLightningEstimator(Estimator):
             shuffle_buffer_length=shuffle_buffer_length,
             cache_data=cache_data,
             ckpt_path=ckpt_path,
+            **kwargs # CHANGE
         ).predictor
 
     def train_from(

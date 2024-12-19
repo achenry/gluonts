@@ -33,7 +33,7 @@ def period_index(entry: DataEntry, freq=None) -> pd.PeriodIndex:
     )
 
 
-def to_pandas(entry: DataEntry, freq: Optional[str] = None) -> pd.Series:
+def to_pandas(entry: DataEntry, freq: Optional[str] = None, is_multivariate: Optional[bool] = False) -> pd.Series:
     """
     Transform a dictionary into a pandas.Series object, using its "start" and
     "target" fields.
@@ -50,7 +50,13 @@ def to_pandas(entry: DataEntry, freq: Optional[str] = None) -> pd.Series:
     pandas.Series
         Pandas time series object.
     """
-    return pd.Series(
-        entry[FieldName.TARGET],
-        index=period_index(entry, freq=freq),
-    )
+    if is_multivariate:
+        return pd.DataFrame(
+            data=entry[FieldName.TARGET].T,
+            index=period_index(entry, freq=freq),
+        )
+    else:
+        return pd.Series(
+            entry[FieldName.TARGET],
+            index=period_index(entry, freq=freq),
+        )

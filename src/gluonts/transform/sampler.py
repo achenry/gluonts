@@ -56,7 +56,7 @@ class NumInstanceSampler(InstanceSampler):
     """
 
     N: int
-
+    
     def __call__(self, ts: np.ndarray) -> np.ndarray:
         a, b = self._get_bounds(ts)
         if a > b:
@@ -145,7 +145,7 @@ class ExpectedNumInstanceSampler(InstanceSampler):
     min_instances: int = 0
     total_length: int = 0
     n: int = 0
-
+    # "each time series/ts" is a DataEntry[self.field_name]
     def __call__(self, ts: np.ndarray) -> np.ndarray:
         a, b = self._get_bounds(ts)
         window_size = b - a + 1

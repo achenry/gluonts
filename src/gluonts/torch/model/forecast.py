@@ -58,6 +58,7 @@ class DistributionForecast(Forecast):
         self.prediction_length = self.shape[0]
         self.item_id = item_id
         self.info = info
+        self._dim: Optional[int] = None
 
         assert isinstance(
             start_date, pd.Period
@@ -65,6 +66,11 @@ class DistributionForecast(Forecast):
         self.start_date = start_date
 
         self._mean = None
+
+    #CHANGE
+    # @property
+    # def dim(self) -> tuple:
+    #     return self.distribution.event_shape
 
     @property
     def mean(self) -> np.ndarray:
@@ -87,13 +93,24 @@ class DistributionForecast(Forecast):
 
     def quantile(self, level: Union[float, str]) -> np.ndarray:
         level = Quantile.parse(level).value
-        return (
-            self.distribution.icdf(
-                torch.tensor([level], device=self.distribution.mean.device)
+        if self.distribution.event_shape == 1:
+            return (
+                self.distribution.icdf(
+                    torch.tensor([level], device=self.distribution.mean.device)
+                )
+                .cpu()
+                .numpy()
             )
-            .cpu()
-            .numpy()
-        )
+        else:
+            # Note: computes quantile on each dimension of the target independently.
+            # `sample_idx` would be same for each element of the batch, time point and dimension.
+            num_samples = 200 # TODO QUESTION should be argument
+            samples = self.distribution.sample(torch.Size((num_samples,)))
+            sorted_samples = torch.sort(samples, axis=0).values
+            # num_samples = sorted_samples.shape[0]
+            sample_idx = int(np.round(num_samples * level)) - 1
+
+            return sorted_samples[sample_idx, :].cpu().numpy()
 
     def to_sample_forecast(self, num_samples: int = 200) -> SampleForecast:
         return SampleForecast(
@@ -104,3 +121,49 @@ class DistributionForecast(Forecast):
             item_id=self.item_id,
             info=self.info,
         )
+
+    # CHANGE
+    def copy_dim(self, dim: int) -> "SampleForecast":
+        """
+        Returns a new Forecast object with only the selected sub-dimension.
+
+        Parameters
+        ----------
+        dim
+            The returned forecast object will only represent this dimension.
+        """
+        if self.distribution.event_shape == 1:
+            distribution = self.distribution
+        else:
+            target_dim = self.distribution.event_shape[0]
+            assert dim < target_dim, (
+                f"must set 0 <= dim < target_dim, but got dim={dim},"
+                f" target_dim={target_dim}"
+            )
+            # distribution = self.distribution[:, :, dim]
+            distribution = self.distribution.__class__(
+                **{param_key: getattr(self.distribution, param_key)[:, dim] for param_key in self.distribution.arg_constraints.keys()}) 
+
+        return DistributionForecast(
+            distribution=distribution,
+            start_date=self.start_date,
+            item_id=self.item_id,
+            info=self.info,
+        )
+
+    def dim(self) -> int:
+        """
+        Returns the dimensionality of the forecast object.
+        """
+        if self._dim is not None:
+            return self._dim
+        else:
+            return self.distribution.event_shape[0]
+            # if len(self.samples.shape) == 2:
+            #     # univariate target
+            #     # shape: (num_samples, prediction_length)
+            #     return 1
+            # else:
+            #     # multivariate target
+            #     # shape: (num_samples, prediction_length, target_dim)
+            #     return self.samples.shape[2]

@@ -32,3 +32,14 @@ def batchify(data: List[dict], device: torch.types.Device = None) -> DataBatch:
         key: stack(data=[item[key] for item in data], device=device)
         for key in data[0].keys()
     }
+
+def multidataset_batchify(data: List[dict], device: torch.types.Device = None) -> DataBatch:
+    res = batchify(data, device)
+    return {
+        key: torch.unsqueeze(res[key], axis=0) if isinstance(res[key], torch.Tensor) else res[key]
+        for key in res
+    }
+    # return {
+    #     key: torch.unsqueeze(stack(data=[item[key] for item in data], device=device), axis=0)
+    #     for key in data[0].keys()
+    # }

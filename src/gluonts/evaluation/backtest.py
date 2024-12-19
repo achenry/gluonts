@@ -12,7 +12,7 @@
 # permissions and limitations under the License.
 
 import logging
-from typing import Optional, Tuple, Iterator
+from typing import Optional, Tuple, Iterator, List # CHANGE
 
 import numpy as np
 import pandas as pd
@@ -45,6 +45,7 @@ def make_evaluation_predictions(
     dataset: Dataset,
     predictor: Predictor,
     num_samples: int = 100,
+    output_distr_params: Optional[bool] = False # CHANGE
 ) -> Tuple[Iterator[Forecast], Iterator[pd.Series]]:
     """
     Returns predictions for the trailing prediction_length observations of the
@@ -75,8 +76,12 @@ def make_evaluation_predictions(
     _, test_template = split(dataset, offset=-window_length)
     test_data = test_template.generate_instances(window_length)
 
+    # CHANGE
+    if output_distr_params:
+        num_samples = 1
+
     return (
-        predictor.predict(test_data.input, num_samples=num_samples),
+        predictor.predict(test_data.input, num_samples=num_samples, output_distr_params=output_distr_params), # CHANGE
         map(_to_dataframe, test_data),
     )
 

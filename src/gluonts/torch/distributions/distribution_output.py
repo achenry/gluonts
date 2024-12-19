@@ -15,6 +15,7 @@ from typing import Dict, Optional, Tuple
 
 import numpy as np
 import torch
+from torch import nn
 import torch.nn.functional as F
 from torch.distributions import (
     Beta,
@@ -23,6 +24,7 @@ from torch.distributions import (
     Laplace,
     Normal,
     Poisson,
+    LowRankMultivariateNormal
 )
 
 from gluonts.core.component import validated
@@ -126,6 +128,101 @@ class NormalOutput(DistributionOutput):
     def event_shape(self) -> Tuple:
         return ()
 
+class SoftReLU(nn.Module):
+    def __init__(self, beta=1.0):
+        super(SoftReLU, self).__init__()
+        self.beta = beta
+
+    def forward(self, x):
+        return torch.log(1 + torch.exp(self.beta * x)) / self.beta
+
+class LowRankMultivariateNormalOutput(DistributionOutput):
+    args_dim: Dict[str, int]
+    distr_cls: type = LowRankMultivariateNormal
+    # dim: int
+    # rank: int
+    # mu_bias: float = 0.0, 
+    # sigma_init: float = 1.0
+    # sigma_minimum: float = 1e-3, 
+    # softrelu: nn.Module = SoftReLU()
+
+    def __init__(self, dim: int, rank: int, mu_bias: float = 0.0, 
+                 sigma_init: float = 1.0, sigma_minimum: float = 1e-3, 
+                 softrelu: nn.Module = SoftReLU()):
+        super().__init__()   
+        self.dim = dim
+        self.rank = rank
+        self.mu_bias = mu_bias
+        self.sigma_init = sigma_init
+        self.sigma_minimum = sigma_minimum
+        self.softrelu = softrelu
+        if self.rank == 0:
+            self.args_dim = {"loc": dim, "cov_diag": dim}
+        else:
+            self.args_dim = {"loc": dim, "cov_diag": dim, "cov_factor": dim * rank}
+
+    def _inv_softplus(self, y):
+        if y < 20.0:
+            # y = log(1 + exp(x))  ==>  x = log(exp(y) - 1)
+            return np.log(np.exp(y) - 1)
+        else:
+            return y
+
+    # @classmethod
+    def domain_map(self, loc: torch.Tensor, cov_diag: torch.Tensor, cov_factor: torch.Tensor):  # type: ignore
+        # scale = F.softplus(scale)
+        # return loc.squeeze(-1), scale.squeeze(-1)
+        r"""
+
+        Parameters
+        ----------
+        loc
+            Tensor of shape (..., dim)
+        cov_diag
+            Tensor of shape (..., dim)
+        cov_factor
+            Tensor of shape (..., dim * rank )
+
+        Returns
+        -------
+        Tuple
+            A tuple containing tensors mu, D, and W, with shapes
+            (..., dim), (..., dim), and (..., dim, rank), respectively.
+
+        """
+        diag_bias = (
+            self._inv_softplus(self.sigma_init ** 2)
+            if self.sigma_init > 0.0
+            else 0.0
+        )
+        shape = cov_factor.shape[:-1] + (self.dim, self.rank)
+        cov_factor = cov_factor.reshape(shape)
+
+        # sigma_minimum helps avoiding cholesky problems, we could also jitter
+        # However, this seems to cause the maximum likelihood estimation to
+        # take longer to converge. This needs to be re-evaluated.
+        cov_diag = (
+            F.softplus(cov_diag + diag_bias) # or soft relu
+            + self.sigma_minimum ** 2
+        )
+
+        if self.rank == 0:
+            return loc + self.mu_bias, cov_diag
+        else:
+            assert (
+                cov_factor is not None
+            ), "cov_factor cannot be None if rank is not zero!"
+            # reshape from vector form (..., d * rank) to matrix form (..., d, rank)
+            # W_matrix = W.reshape(
+            #     (-2, self.dim, self.rank, -4), reverse=1
+            # )
+            # W_matrix = cov_factor.reshape((cov_factor.shape[0], cov_factor.shape[1], self.dim, self.rank))
+            return loc + self.mu_bias, cov_factor, cov_diag 
+
+
+    @property
+    def event_shape(self) -> Tuple:
+        return (self.dim,)
 
 class LaplaceOutput(DistributionOutput):
     args_dim: Dict[str, int] = {"loc": 1, "scale": 1}

@@ -183,7 +183,6 @@ class PandasDataset:
                 'same column ("long" format), consider constructing the '
                 "dataset with `PandasDataset.from_long_dataframe` instead."
             )
-
         entry = {
             "start": df.index[0],
         }

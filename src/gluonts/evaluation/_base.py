@@ -258,7 +258,7 @@ class Evaluator:
             total=num_series,
             desc="Running evaluation",
         ) as it, np.errstate(divide="ignore", invalid="ignore"):
-            if self.num_workers and not sys.platform == "win32":
+            if self.num_workers and not sys.platform == "win32": 
                 mp_pool = multiprocessing.Pool(
                     initializer=None, processes=self.num_workers
                 )
@@ -330,7 +330,7 @@ class Evaluator:
 
         # cut the time series using the dates of the forecast object
         return np.atleast_1d(
-            np.squeeze(time_series.loc[forecast.index].transpose())
+            np.squeeze(time_series.loc[forecast.index].transpose()) # QUESTION CHANGE TODO why transpose, doesn't work for multivariate...
         )
 
     # This method is needed for the owa calculation. It extracts the training
@@ -365,7 +365,7 @@ class Evaluator:
         # everything after the prediction range is truncated
         date_before_forecast = forecast.index[0] - forecast.freq
         return np.atleast_1d(
-            np.squeeze(time_series.loc[:date_before_forecast].transpose())
+            np.squeeze(time_series.loc[:date_before_forecast].transpose())# QUESTION CHANGE TODO why transpose, doesn't work for multivariate..
         )
 
     def get_base_metrics(
@@ -395,13 +395,15 @@ class Evaluator:
     def get_metrics_per_ts(
         self, time_series: Union[pd.Series, pd.DataFrame], forecast: Forecast
     ) -> Mapping[str, Union[float, str, None, np.ma.core.MaskedConstant]]:
-        if not validate_forecast(forecast, self.quantiles):
-            if self.allow_nan_forecast:
-                logging.warning(
-                    "Forecast contains NaN values. Metrics may be incorrect."
-                )
-            else:
-                raise ValueError("Forecast contains NaN values.")
+
+        # CHANGE cannot check quantiles for multivariate distributions
+        # if not validate_forecast(forecast, self.quantiles):
+        #     if self.allow_nan_forecast:
+        #         logging.warning(
+        #             "Forecast contains NaN values. Metrics may be incorrect."
+        #         )
+        #     else:
+        #         raise ValueError("Forecast contains NaN values.")
 
         pred_target = np.array(self.extract_pred_target(time_series, forecast))
         past_data = np.array(self.extract_past_data(time_series, forecast))
@@ -663,7 +665,7 @@ class MultivariateEvaluator(Evaluator):
         forecast_iterator: Iterator[Forecast], dim: int
     ) -> Iterator[Forecast]:
         for forecast in forecast_iterator:
-            yield forecast.copy_dim(dim)
+            yield forecast.copy_dim(dim) # TODO
 
     @staticmethod
     def extract_aggregate_target(
@@ -687,7 +689,8 @@ class MultivariateEvaluator(Evaluator):
 
     @staticmethod
     def get_target_dimensionality(forecast: Forecast) -> int:
-        target_dim = forecast.dim()
+        # target_dim = forecast.shape[-1] # CHANGE .dim TODO
+        target_dim = forecast.dim() # CHANGE .dim TODO
         assert target_dim > 1, (
             "the dimensionality of the forecast should be larger than 1, "
             f"but got {target_dim}. "

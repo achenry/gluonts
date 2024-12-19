@@ -1,4 +1,0 @@
-pytorchts==0.2.0
-numpy
-torch>=1.5.0
-tensorboard

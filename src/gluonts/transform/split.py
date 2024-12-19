@@ -155,8 +155,11 @@ class InstanceSplitter(FlatMapTransformation):
     def flatmap_transform(
         self, entry: DataEntry, is_train: bool
     ) -> Iterator[DataEntry]:
+        # a DataEntry is a full dataset with all time steps and target variables. TODO QUESTION when would you have multiple of these?
+        # instance_sampler is fetching indices over time from this data_entry[target_field]
         sampled_indices = self.instance_sampler(entry[self.target_field])
 
+        # _split_instance splits the time features and targets into past and future
         for idx in sampled_indices:
             yield self._split_instance(entry, idx)
 

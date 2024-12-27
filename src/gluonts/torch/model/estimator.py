@@ -183,7 +183,7 @@ class PyTorchLightningEstimator(Estimator):
                     transformed_validation_data = Cached(
                         transformed_validation_data
                     )
-
+                # TODO check if it's okay to use cyclic data stream and num_batches_per_epoch argument in here
                 validation_data_loader = self.create_validation_data_loader(
                     transformed_validation_data,
                     training_network,
@@ -207,7 +207,7 @@ class PyTorchLightningEstimator(Estimator):
                 **self.trainer_kwargs,
             }
         )
-
+        
         trainer.fit(
             model=training_network,
             train_dataloaders=training_data_loader,

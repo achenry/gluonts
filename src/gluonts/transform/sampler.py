@@ -44,6 +44,14 @@ class InstanceSampler(BaseModel):
     def __call__(self, ts: np.ndarray) -> np.ndarray:
         raise NotImplementedError()
 
+class SequentialSampler(InstanceSampler):
+    def __call__(self, ts: np.ndarray) -> np.ndarray:
+        a, b = self._get_bounds(ts)
+
+        if a > b:
+            return np.array([], dtype=int)
+
+        return list(range(a, b + 1))
 
 class NumInstanceSampler(InstanceSampler):
     """

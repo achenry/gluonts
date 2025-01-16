@@ -19,6 +19,7 @@ from typing import Any, Iterable, Optional, Type, Union
 
 import numpy as np
 import pandas as pd
+import polars as pl
 from pandas.core.indexes.datetimelike import DatetimeIndexOpsMixin
 from toolz import first
 
@@ -28,9 +29,87 @@ from gluonts.itertools import Map, StarMap, SizedIterable
 
 logger = logging.getLogger(__name__)
 
-
 @dataclass
-class PandasDataset:
+class DataFrameDataset:
+    dataframes: InitVar[
+        Union[
+            pd.DataFrame,
+            pd.Series,
+            pl.LazyFrame,
+            pl.DataFrame,
+            pl.Series,
+            Iterable[pd.DataFrame],
+            Iterable[pd.Series],
+            Iterable[tuple[Any, pd.DataFrame]],
+            Iterable[tuple[Any, pd.Series]],
+            Iterable[pl.LazyFrame],
+            Iterable[pl.DataFrame],
+            Iterable[pl.Series],
+            Iterable[tuple[Any, pl.LazyFrame]],
+            Iterable[tuple[Any, pl.DataFrame]],
+            Iterable[tuple[Any, pl.Series]],
+            dict[str, pd.DataFrame],
+            dict[str, pd.Series],
+            dict[str, pl.LazyFrame],
+            dict[str, pl.DataFrame],
+            dict[str, pl.Series],
+        ]
+    ]
+
+    target: Union[str, list[str]] = "target"
+    feat_dynamic_real: Optional[list[str]] = None
+    past_feat_dynamic_real: Optional[list[str]] = None
+    timestamp: Optional[str] = None
+    freq: Optional[str] = None
+    future_length: int = 0
+    unchecked: bool = False
+    assume_sorted: bool = False
+    dtype: Type = np.float32
+    _data_entries: SizedIterable = field(init=False)
+
+    def __iter__(self):
+        yield from self._data_entries
+        self.unchecked = True
+
+    def __len__(self) -> int:
+        return len(self._data_entries)
+
+    def __repr__(self) -> str:
+        info = ", ".join(
+            [
+                f"size={len(self)}",
+                f"freq={self.freq}",
+                f"num_feat_dynamic_real={self.num_feat_dynamic_real}",
+                f"num_past_feat_dynamic_real={self.num_past_feat_dynamic_real}",
+                f"num_feat_static_real={self.num_feat_static_real}",
+                f"num_feat_static_cat={self.num_feat_static_cat}",
+                f"static_cardinalities={self.static_cardinalities}",
+            ]
+        )
+        return f"{self.__class__.__name__}<{info}>"
+    
+    @property
+    def num_feat_static_cat(self) -> int:
+        return len(self._static_cats)
+
+    @property
+    def num_feat_static_real(self) -> int:
+        return len(self._static_reals)
+
+    @property
+    def num_feat_dynamic_real(self) -> int:
+        return maybe.map_or(self.feat_dynamic_real, len, 0)
+
+    @property
+    def num_past_feat_dynamic_real(self) -> int:
+        return maybe.map_or(self.past_feat_dynamic_real, len, 0)
+
+    @property
+    def static_cardinalities(self):
+        return self._static_cats.max(axis=1).values + 1
+    
+@dataclass
+class PandasDataset(DataFrameDataset):
     """
     A dataset type based on ``pandas.DataFrame``.
 
@@ -74,33 +153,19 @@ class PandasDataset:
         (Default: ``False``)
     """
 
-    dataframes: InitVar[
-        Union[
-            pd.DataFrame,
-            pd.Series,
-            Iterable[pd.DataFrame],
-            Iterable[pd.Series],
-            Iterable[tuple[Any, pd.DataFrame]],
-            Iterable[tuple[Any, pd.Series]],
-            dict[str, pd.DataFrame],
-            dict[str, pd.Series],
-        ]
-    ]
-    target: Union[str, list[str]] = "target"
-    feat_dynamic_real: Optional[list[str]] = None
-    past_feat_dynamic_real: Optional[list[str]] = None
-    timestamp: Optional[str] = None
-    freq: Optional[str] = None
     static_features: InitVar[Optional[pd.DataFrame]] = None
-    future_length: int = 0
-    unchecked: bool = False
-    assume_sorted: bool = False
-    dtype: Type = np.float32
-    _data_entries: SizedIterable = field(init=False)
     _static_reals: pd.DataFrame = field(init=False)
     _static_cats: pd.DataFrame = field(init=False)
 
     def __post_init__(self, dataframes, static_features):
+        # assert isinstance(dataframes, (
+        #     pd.Series, pd.DataFrame, 
+        #     Iterable[pd.DataFrame], Iterable[pd.Series], 
+        #     Iterable[tuple[Any, pd.DataFrame]], Iterable[tuple[Any, pd.Series]],
+        #     dict[str, pd.DataFrame], dict[str, pd.Series]
+        # )), "dataframes arguement must be of type 'pd.Series', 'pd.DataFrame', or iterables/iterables of tuples, dicts of the above"
+        
+
         if isinstance(dataframes, dict):
             pairs = dataframes.items()
         elif isinstance(dataframes, (pd.Series, pd.DataFrame)):
@@ -141,26 +206,6 @@ class PandasDataset:
             .T
         )
 
-    @property
-    def num_feat_static_cat(self) -> int:
-        return len(self._static_cats)
-
-    @property
-    def num_feat_static_real(self) -> int:
-        return len(self._static_reals)
-
-    @property
-    def num_feat_dynamic_real(self) -> int:
-        return maybe.map_or(self.feat_dynamic_real, len, 0)
-
-    @property
-    def num_past_feat_dynamic_real(self) -> int:
-        return maybe.map_or(self.past_feat_dynamic_real, len, 0)
-
-    @property
-    def static_cardinalities(self):
-        return self._static_cats.max(axis=1).values + 1
-
     def _pair_to_dataentry(self, item_id, df) -> DataEntry:
         if isinstance(df, pd.Series):
             df = df.to_frame(name=self.target)
@@ -183,13 +228,14 @@ class PandasDataset:
                 'same column ("long" format), consider constructing the '
                 "dataset with `PandasDataset.from_long_dataframe` instead."
             )
+
         entry = {
             "start": df.index[0],
         }
 
         target = df[self.target].values
         target = target[: len(target) - self.future_length]
-        entry["target"] = target.T
+        entry["target"] = target.T # shape (num_features, time)
 
         if item_id is not None:
             entry["item_id"] = item_id
@@ -211,27 +257,6 @@ class PandasDataset:
             entry["past_feat_dynamic_real"] = past_feat_dynamic_real.T
 
         return entry
-
-    def __iter__(self):
-        yield from self._data_entries
-        self.unchecked = True
-
-    def __len__(self) -> int:
-        return len(self._data_entries)
-
-    def __repr__(self) -> str:
-        info = ", ".join(
-            [
-                f"size={len(self)}",
-                f"freq={self.freq}",
-                f"num_feat_dynamic_real={self.num_feat_dynamic_real}",
-                f"num_past_feat_dynamic_real={self.num_past_feat_dynamic_real}",
-                f"num_feat_static_real={self.num_feat_static_real}",
-                f"num_feat_static_cat={self.num_feat_static_cat}",
-                f"static_cardinalities={self.static_cardinalities}",
-            ]
-        )
-        return f"PandasDataset<{info}>"
 
     @classmethod
     def from_long_dataframe(
@@ -314,20 +339,221 @@ class PandasDataset:
             **kwargs,
         )
 
+@dataclass
+class PolarsDataset(DataFrameDataset):
+    """_summary_
 
-def pair_with_item_id(obj: Union[tuple, pd.DataFrame, pd.Series]):
+    Args:
+        PandasDataset (_type_): _description_
+
+    Raises:
+        ValueError: _description_
+
+    Returns:
+        _type_: _description_
+
+    Yields:
+        _type_: _description_
+    """
+
+    static_features: InitVar[Optional[Union[pl.DataFrame, pl.LazyFrame]]] = None
+    _static_reals: Union[pl.DataFrame, pl.LazyFrame] = field(init=False)
+    _static_cats: Union[pl.DataFrame, pl.LazyFrame] = field(init=False)
+
+    def __post_init__(self, dataframes, static_features):
+        # assert isinstance(dataframes, (
+        #     pl.Series, pl.DataFrame, pl.LazyFrame,
+        #     Iterable[pl.DataFrame], Iterable[pl.LazyFrame], Iterable[pl.Series], 
+        #     Iterable[tuple[Any, pl.DataFrame]], Iterable[tuple[Any, pl.LazyFrame]], Iterable[tuple[Any, pl.Series]],
+        #     dict[str, pl.DataFrame], dict[str, pl.LazyFrame], dict[str, pl.Series]
+        # )), "dataframes arguement must be of type 'pl.Series', 'pl.DataFrame', 'pl.LazyFrame', or iterables/iterables of tuples, dicts of the above"
+        assert self.timestamp is not None, "Must provide timestamp column name for polars DataFrame/LazyFrame"
+        if isinstance(dataframes, dict):
+            pairs = dataframes.items()
+        elif isinstance(dataframes, (pl.Series, pl.DataFrame, pl.LazyFrame)):
+            pairs = [(None, dataframes)]
+        else:
+            assert isinstance(dataframes, SizedIterable)
+            pairs = Map(pair_with_item_id, dataframes)
+
+        self._data_entries = StarMap(self._pair_to_dataentry, pairs)
+
+        if self.freq is None:
+            assert (
+                self.timestamp is None
+            ), "You need to provide `freq` along with `timestamp`"
+
+            self.freq = infer_freq(first(pairs)[1].select("time"))
+
+        static_features = maybe.unwrap_or_else(static_features, pd.DataFrame)
+
+        object_columns = static_features.select_dtypes(
+            "object"
+        ).columns.tolist()
+        if object_columns:
+            logger.warning(
+                f"Columns {object_columns} in static_features "
+                f"have 'object' as data type and will be ignored; "
+                f"consider setting this to 'category' using pd.DataFrame.astype, "
+                f"if you wish to use them as categorical columns."
+            )
+
+        self._static_reals = (
+            static_features.select_dtypes("number").astype(self.dtype).T
+        )
+        self._static_cats = (
+            static_features.select_dtypes("category")
+            .apply(lambda col: col.cat.codes)
+            .astype(self.dtype)
+            .T
+        )
+
+    def _pair_to_dataentry(self, item_id, df) -> DataEntry:
+
+        if isinstance(df, pl.Series):
+            df = df.to_frame(name=self.target).lazy()
+
+        if self.timestamp:
+            df = df.with_columns(pl.col(self.timestamp).dt.round(self.freq))
+
+        if not self.assume_sorted:
+            df = df.sort(by=self.timestamp)
+
+        if not self.unchecked:
+            assert is_uniform(df.select(pl.col(self.timestamp))), (
+                "Dataframe index is not uniformly spaced. "
+                "If your dataframe contains data from multiple series in the "
+                'same column ("long" format), consider constructing the '
+                "dataset with `PandasDataset.from_long_dataframe` instead."
+            )
+
+        entry = {
+            "start": pd.Period(df.select(pl.col(self.timestamp).first()).collect().item(), freq=self.freq),
+        }
+
+        target_len = df.select(pl.len()).collect().item() 
+        target = df.select(pl.col(self.target).slice(0, target_len - self.future_length))
+        entry["target"] = np.squeeze(target.collect().to_numpy().T)
+
+        if item_id is not None:
+            entry["item_id"] = item_id
+
+        if self.num_feat_static_cat > 0:
+            entry["feat_static_cat"] = self._static_cats[item_id].values
+
+        if self.num_feat_static_real > 0:
+            entry["feat_static_real"] = self._static_reals[item_id].values
+
+        if self.num_feat_dynamic_real > 0:
+            entry["feat_dynamic_real"] = df.select(pl.col(self.feat_dynamic_real)).collect().to_numpy().T
+
+        if self.num_past_feat_dynamic_real > 0:
+            past_feat_dynamic_real_len = df.select(pl.len()).collect().item() # TODO same as target_len? 
+            past_feat_dynamic_real = df.select(pl.col(self.past_feat_dynamic_real).slice(0, past_feat_dynamic_real_len - self.future_length))
+            entry["past_feat_dynamic_real"] = past_feat_dynamic_real.collect().to_numpy().T
+
+        return entry
+
+
+    @classmethod
+    def from_long_dataframe(
+        cls,
+        dataframe: Union[pl.DataFrame, pl.LazyFrame],
+        item_id: str,
+        timestamp: Optional[str] = None,
+        static_feature_columns: Optional[list[str]] = None,
+        static_features: pd.DataFrame = pd.DataFrame(),
+        **kwargs,
+    ) -> "PandasDataset":
+        """
+        Construct ``PandasDataset`` out of a long data frame.
+
+        A long dataframe contains time series data (both the target series and
+        covariates) about multiple items at once. An ``item_id`` column is used
+        to distinguish the items and ``group_by`` accordingly.
+
+        Static features can be included in the long data frame as well (with
+        constant value), or be given as a separate data frame indexed by the
+        ``item_id`` values.
+
+        Note: on large datasets, this constructor can take some time to complete
+        since it does some indexing and groupby operations on the data, and caches
+        the result.
+
+        Parameters
+        ----------
+        dataframe
+            pandas.DataFrame containing at least ``timestamp``, ``target`` and
+            ``item_id`` columns.
+        item_id
+            Name of the column that, when grouped by, gives the different time
+            series.
+        static_feature_columns
+            Columns in ``dataframe`` containing static features.
+        static_features
+            Dedicated ``DataFrame`` for static features. If both ``static_features``
+            and ``static_feature_columns`` are specified, then the two sets of features
+            are appended together.
+        **kwargs
+            Additional arguments. Same as of PandasDataset class.
+
+        Returns
+        -------
+        PandasDataset
+            Dataset containing series data from the given long dataframe.
+        """
+        if timestamp is not None:
+            logger.info(f"Indexing data by '{timestamp}'.")
+            dataframe = dataframe.with_columns(pl.col(timestamp).str.to_datetime())
+
+        if static_feature_columns is not None:
+            logger.info(
+                f"Collecting features from columns {static_feature_columns}."
+            )
+            other_static_features = (
+                dataframe.select([[item_id] + static_feature_columns])
+                .unique()
+                .collect()
+                .to_pandas()
+                .set_index(item_id)
+            )
+            assert len(other_static_features) == len(
+                dataframe.select(pl.col(item_id)).unique()
+            )
+        else:
+            other_static_features = pd.DataFrame()
+
+        logger.info(f"Grouping data by '{item_id}'; this may take some time.")
+        pairs = list(dataframe.group_by(item_id))
+
+        return cls(
+            dataframes=pairs,
+            static_features=pd.concat(
+                [static_features, other_static_features], axis=1
+            ),
+            **kwargs,
+        )
+
+
+def pair_with_item_id(obj: Union[tuple, pd.DataFrame, pd.Series, pl.DataFrame, pl.LazyFrame]):
     if isinstance(obj, tuple) and len(obj) == 2:
         return obj
-    if isinstance(obj, (pd.DataFrame, pd.Series)):
+    if isinstance(obj, (pd.DataFrame, pd.Series, pl.DataFrame, pl.LazyFrame)):
         return (None, obj)
     raise ValueError("input must be a pair, or a pandas Series or DataFrame.")
 
 
-def infer_freq(index: pd.Index) -> str:
+def infer_freq(index: Union[pd.Index, pl.DataFrame, pl.LazyFrame]) -> str:
     if isinstance(index, pd.PeriodIndex):
         return index.freqstr
-
-    freq = pd.infer_freq(index)
+    elif isinstance(index, pl.LazyFrame):
+        freq = index.select(pl.all().diff().last()).collect().item()
+        freq = f"{freq.seconds}s" 
+    elif isinstance(index, pl.DataFrame):
+        freq = index.select(pl.all().diff().last()).item()
+        freq = f"{freq.seconds}s"
+    else:
+        freq = pd.infer_freq(index)
     # pandas likes to infer the `start of x` frequency, however when doing
     # df.to_period("<x>S"), it fails, so we avoid using it. It's enough to
     # remove the trailing S, e.g `MS` -> `M
@@ -337,7 +563,7 @@ def infer_freq(index: pd.Index) -> str:
     return freq
 
 
-def is_uniform(index: pd.PeriodIndex) -> bool:
+def is_uniform(index: Union[pd.PeriodIndex, pl.DataFrame, pl.LazyFrame]) -> bool:
     """
     Check if ``index`` contains monotonically increasing periods, evenly spaced
     with frequency ``index.freq``.
@@ -349,5 +575,11 @@ def is_uniform(index: pd.PeriodIndex) -> bool:
         >>> is_uniform(pd.DatetimeIndex(ts).to_period("2H"))
         False
     """
-
-    return bool(np.all(np.diff(index.asi8) == index.freq.n))
+    if isinstance(index, pl.DataFrame):
+        freq = index.select(pl.all().diff().slice(1).first()).item()
+        return index.select((pl.all().diff().slice(1) == freq).all()).item()
+    elif isinstance(index, pl.LazyFrame): 
+        freq = index.select(pl.all().diff().slice(1).first()).collect().item()
+        return index.select((pl.all().diff().slice(1) == freq).all()).collect().item()
+    else:
+        return bool(np.all(np.diff(index.asi8) == index.freq.n))

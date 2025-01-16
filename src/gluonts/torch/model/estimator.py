@@ -166,6 +166,7 @@ class PyTorchLightningEstimator(Estimator):
 
             training_network = self.create_lightning_module()
 
+            
             training_data_loader = self.create_training_data_loader(
                 transformed_training_data,
                 training_network,
@@ -183,7 +184,8 @@ class PyTorchLightningEstimator(Estimator):
                     transformed_validation_data = Cached(
                         transformed_validation_data
                     )
-                # TODO check if it's okay to use cyclic data stream and num_batches_per_epoch argument in here
+
+                
                 validation_data_loader = self.create_validation_data_loader(
                     transformed_validation_data,
                     training_network,
@@ -202,7 +204,7 @@ class PyTorchLightningEstimator(Estimator):
         custom_callbacks = self.trainer_kwargs.pop("callbacks", [])
         trainer = pl.Trainer(
             **{
-                "accelerator": "auto",
+                # "accelerator": "auto",
                 "callbacks": [checkpoint] + custom_callbacks,
                 **self.trainer_kwargs,
             }

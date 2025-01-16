@@ -50,7 +50,7 @@ class SequentialSampler(InstanceSampler):
 
         if a > b:
             return np.array([], dtype=int)
-
+        # TODO test if this is really generating a rolling window
         return list(range(a, b + 1))
 
 class NumInstanceSampler(InstanceSampler):

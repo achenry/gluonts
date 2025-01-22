@@ -20,6 +20,7 @@ __all__ = [
     "AddTimeFeatures",
     "AdhocTransform",
     "AsNumpyArray",
+    "AsLazyFrame",
     "BucketInstanceSampler",
     "CanonicalInstanceSplitter",
     "cdf_to_gaussian_forward_transform",
@@ -81,6 +82,7 @@ from ._base import (
 )
 from .convert import (
     AsNumpyArray,
+    AsLazyFrame,
     CDFtoGaussianTransform,
     ConcatFeatures,
     ExpandDimArray,

@@ -15,10 +15,12 @@ from typing import List, Optional, Union, Type
 
 import numpy as np
 import pandas as pd
+import polars as pl
 
 from gluonts.core.component import validated
 from gluonts.dataset.common import DataEntry
 from gluonts.dataset.field_names import FieldName
+from gluonts.dataset.pandas import IterableLazyFrame
 from gluonts.time_feature import TimeFeature
 
 from ._base import MapTransformation, SimpleTransformation
@@ -77,8 +79,13 @@ class DummyValueImputation(MissingValueImputation):
         self.dummy_value = dummy_value
 
     def __call__(self, values: np.ndarray) -> np.ndarray:
-        nan_indices = np.where(np.isnan(values))
-        values[nan_indices] = self.dummy_value
+        if isinstance(values, np.ndarray):
+            nan_indices = np.where(np.isnan(values))
+            values[nan_indices] = self.dummy_value
+        elif isinstance(values, pl.LazyFrame):
+            values = values.fill_nan(None).fill_null(self.dummy_value)
+        else:
+            raise Exception()
         return values
 
 
@@ -248,17 +255,28 @@ class AddObservedValuesIndicator(SimpleTransformation):
 
     def transform(self, data: DataEntry) -> DataEntry:
         value = data[self.target_field]
-        nan_entries = np.isnan(value)
+        if isinstance(value, np.ndarray):
+            nan_entries = np.isnan(value)
 
-        if self.imputation_method is not None:
-            if nan_entries.any():
-                value = value.copy()
-                data[self.target_field] = self.imputation_method(value)
+            if self.imputation_method is not None:
+                if nan_entries.any():
+                    value = value.copy()
+                    data[self.target_field] = self.imputation_method(value)
 
-        data[self.output_field] = np.invert(
-            nan_entries, out=nan_entries
-        ).astype(self.dtype, copy=False)
-        return data
+            data[self.output_field] = np.invert(
+                nan_entries, out=nan_entries
+            ).astype(self.dtype, copy=False)
+            return data
+        elif isinstance(value, IterableLazyFrame): # check if IterableLazyFrame
+            nan_entries = value.select((pl.all().is_null() | pl.all().is_nan()).cast(pl.Boolean))
+            if self.imputation_method is not None:
+                if nan_entries.select(pl.any_horizontal(pl.all().any())).collect().item():
+                    data[self.target_field] = self.imputation_method(value)
+                    
+            data[self.output_field] = nan_entries.select(pl.all().not_().cast(self.dtype))
+            return data
+        else:
+            raise Exception()
 
 
 class AddConstFeature(MapTransformation):
@@ -357,9 +375,14 @@ class AddTimeFeatures(MapTransformation):
             return data
 
         start = data[self.start_field]
-        length = target_transformation_length(
-            data[self.target_field], self.pred_length, is_train=is_train
-        )
+        if isinstance(data[self.target_field], np.ndarray):
+            length = target_transformation_length(
+                data[self.target_field], self.pred_length, is_train=is_train
+            )
+        elif isinstance(data[self.target_field], IterableLazyFrame): # check if IterableLazyFrame
+            length = data[self.target_field].length + (0 if is_train else self.pred_length)
+        else:
+            raise Exception()
 
         index = pd.period_range(start, periods=length, freq=start.freq)
 
@@ -411,9 +434,14 @@ class AddAgeFeature(MapTransformation):
         self.dtype = dtype
 
     def map_transform(self, data: DataEntry, is_train: bool) -> DataEntry:
-        length = target_transformation_length(
-            data[self.target_field], self.pred_length, is_train=is_train
-        )
+        if isinstance(data[self.target_field], np.ndarray):
+            length = target_transformation_length(
+                data[self.target_field], self.pred_length, is_train=is_train
+            )
+        elif isinstance(data[self.target_field], IterableLazyFrame): # check if IterableLazyFrame 
+            length = data[self.target_field].length + (0 if is_train else self.pred_length)
+        else:
+            raise Exception()
 
         if self.log_scale:
             age = np.log10(2.0 + np.arange(length, dtype=self.dtype))

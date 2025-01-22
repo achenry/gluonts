@@ -74,8 +74,7 @@ class PyTorchPredictor(RepresentablePredictor):
     def predict(  # type: ignore
         self, dataset: Dataset, num_samples: Optional[int] = None, **kwargs
     ) -> Iterator[Forecast]:
-        # CHANGE througout TODO QUESTION is there a better way to do this
-
+        
         inference_data_loader = InferenceDataLoader(
             dataset,
             transform=self.input_transform
@@ -83,14 +82,8 @@ class PyTorchPredictor(RepresentablePredictor):
                 self.input_names + self.required_fields, allow_missing=True
             ),
             batch_size=self.batch_size,
-            # stack_fn=lambda data: (multidataset_batchify(data, self.device) if len(dataset.test_data.dataset) > 1 else batchify(data, self.device))
             stack_fn=lambda data:  batchify(data, self.device)
-            # stack_fn=(lambda data: batchify(data, self.device)) if len(dataset.test_data.dataset) == 1 else (lambda data: {k: torch.unsqueeze(v, 0) for k, v in batchify(data, self.device).items()}),
         )
-        # from gluonts.transform.convert import ExpandDimArray
-        # if len(dataset.test_data.dataset) > 1:
-        #     # if there are multiple continuity groups in the test data
-        #     inference_data_loader.transformation += ExpandDimArray(axis=0)
 
         self.prediction_net.eval()
 

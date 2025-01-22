@@ -161,6 +161,7 @@ class PyTorchLightningEstimator(Estimator):
                 training_data, is_train=True
             )
             # x = next(iter(transformed_training_data))
+             
             if cache_data:
                 transformed_training_data = Cached(transformed_training_data)
 
@@ -172,7 +173,7 @@ class PyTorchLightningEstimator(Estimator):
                 training_network,
                 shuffle_buffer_length=shuffle_buffer_length,
             )
-
+            
         validation_data_loader = None
 
         if validation_data is not None:

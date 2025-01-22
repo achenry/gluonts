@@ -16,10 +16,12 @@ from typing import Callable, Iterator, List, Optional, Tuple, Type
 import numpy as np
 from toolz import valmap
 
+import polars as pl
+
 from gluonts.core.component import validated, tensor_to_numpy
 from gluonts.dataset.common import DataEntry
+from gluonts.dataset.pandas import IterableLazyFrame, concat_lazyframes
 from gluonts.exceptions import assert_data_error
-
 from ._base import (
     FlatMapTransformation,
     MapTransformation,
@@ -147,6 +149,41 @@ class AsNumpyArray(SimpleTransformation):
         data[self.field] = value
         return data
 
+class AsLazyFrame(SimpleTransformation):
+    """
+    Converts the value of a field into a numpy array.
+
+    Parameters
+    ----------
+    expected_ndim
+        Expected number of dimensions. Throws an exception if the number of
+        dimensions does not match.
+    dtype
+        numpy dtype to use.
+    """
+
+    @validated()
+    def __init__(
+        self, field: str, expected_ndim: int, dtype: Type = pl.Float32
+    ) -> None:
+        self.field = field
+        self.expected_ndim = expected_ndim
+        self.dtype = dtype
+
+    def transform(self, data: DataEntry) -> DataEntry:
+        ndim = 2 if len(data[self.field].collect_schema().names()) > 1 else 1
+        data[self.field] = data[self.field].select(pl.all().cast(self.dtype))
+        
+        assert_data_error(
+            ndim == self.expected_ndim,
+            'Input for field "{self.field}" does not have the required'
+            "dimension (field: {self.field}, ndim observed: {ndim}, "
+            "expected ndim: {self.expected_ndim})",
+            ndim=ndim,
+            self=self,
+        )
+        
+        return data
 
 class ExpandDimArray(SimpleTransformation):
     """
@@ -212,11 +249,26 @@ class VstackFeatures(SimpleTransformation):
 
     def transform(self, data: DataEntry) -> DataEntry:
         r = [
-            data[fname]
+            (fname, data[fname])
             for fname in self.input_fields
             if data[fname] is not None
         ]
-        output = np.vstack(r) if not self.h_stack else np.hstack(r)
+        if all(isinstance(v, np.ndarray) for _, v in r):
+            output = np.vstack([v for _, v in r]) if not self.h_stack else np.hstack([v for _, v in r])
+        elif any(isinstance(v, IterableLazyFrame) for _, v in r): # check if IterableLazyFrame
+            # return a concatenated lazyframe
+            output = []
+            for fname, v in r:
+                if isinstance(v, np.ndarray):
+                    output.append(IterableLazyFrame(v.T, schema=[f"{fname}_{i}" for i in range(v.shape[0])]))
+                elif isinstance(v, IterableLazyFrame): # check if IterableLazyFrame
+                    output.append(v)
+                else:
+                    raise Exception()
+            # need to flip orientations since pl.LazyFrame is (n time steps, n vars) and numpy data is (n vars, n time steps)
+            output = concat_lazyframes(output, how="horizontal") if not self.h_stack else concat_lazyframes(output, how="vertical")
+        else:
+            raise Exception()
         data[self.output_field] = output
         for fname in self.cols_to_drop:
             del data[fname]

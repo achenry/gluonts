@@ -15,10 +15,12 @@ from typing import Iterator, List, Optional, Tuple
 
 import numpy as np
 from pandas.tseries.offsets import BaseOffset
+import polars as pl
 
 from gluonts.core.component import validated
 from gluonts.dataset.common import DataEntry
 from gluonts.dataset.field_names import FieldName
+from gluonts.dataset.pandas import IterableLazyFrame
 from gluonts.zebras._util import pad_axis
 
 from ._base import FlatMapTransformation
@@ -108,8 +110,9 @@ class InstanceSplitter(FlatMapTransformation):
     def _split_array(
         self, array: np.ndarray, idx: int
     ) -> Tuple[np.ndarray, np.ndarray]:
+                
         if idx >= self.past_length:
-            past_piece = array[..., idx - self.past_length : idx]
+            past_piece = array[..., idx - self.past_length : idx] 
         else:
             past_piece = pad_axis(
                 array[..., :idx],
@@ -121,7 +124,7 @@ class InstanceSplitter(FlatMapTransformation):
         future_start = idx + self.lead_time
         future_slice = slice(future_start, future_start + self.future_length)
         future_piece = array[..., future_slice]
-
+        #array.collect().slice(future_slice.start, future_slice.stop - future_slice.start)
         return past_piece, future_piece
 
     def _split_instance(self, entry: DataEntry, idx: int) -> DataEntry:
@@ -131,19 +134,29 @@ class InstanceSplitter(FlatMapTransformation):
         entry = entry.copy()
 
         for ts_field in slice_cols:
+            
             past_piece, future_piece = self._split_array(entry[ts_field], idx)
-
+            
+            assert past_piece.shape[1] == self.past_length
+            
             if self.output_NTC:
                 past_piece = past_piece.transpose()
                 future_piece = future_piece.transpose()
 
             entry[self._past(ts_field)] = past_piece
             entry[self._future(ts_field)] = future_piece
+             
             del entry[ts_field]
 
-        pad_indicator = np.zeros(self.past_length, dtype=dtype)
         pad_length = max(self.past_length - idx, 0)
-        pad_indicator[:pad_length] = 1
+        if isinstance(entry[self._past(self.target_field)], np.ndarray):
+            # numpy or native type
+            pad_indicator = np.zeros(self.past_length, dtype=dtype)
+            pad_indicator[:pad_length] = 1
+        else:
+            pad_indicator = np.zeros(self.past_length, dtype=dtype.to_python())
+            pad_indicator[:pad_length] = 1
+            pad_indicator = IterableLazyFrame(data=pad_indicator)
 
         entry[self._past(self.is_pad_field)] = pad_indicator
         entry[self.forecast_start_field] = (

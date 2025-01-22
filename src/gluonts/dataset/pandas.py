@@ -15,11 +15,23 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field, InitVar
-from typing import Any, Iterable, Optional, Type, Union
+from typing import Any, Iterable, Optional, Type, Union, get_args
 
 import numpy as np
 import pandas as pd
+
 import polars as pl
+import polars.polars as plr
+import polars.selectors as cs
+from polars._typing import ConcatMethod
+from polars._utils.wrap import wrap_ldf
+from polars import functions as F
+from polars.exceptions import InvalidOperationError
+from polars._utils.various import ordered_unique
+
+from functools import reduce
+from itertools import chain
+
 from pandas.core.indexes.datetimelike import DatetimeIndexOpsMixin
 from toolz import first
 
@@ -64,6 +76,7 @@ class DataFrameDataset:
     future_length: int = 0
     unchecked: bool = False
     assume_sorted: bool = False
+    assume_resampled: bool = False
     dtype: Type = np.float32
     _data_entries: SizedIterable = field(init=False)
 
@@ -410,10 +423,10 @@ class PolarsDataset(DataFrameDataset):
 
     def _pair_to_dataentry(self, item_id, df) -> DataEntry:
 
-        if isinstance(df, pl.Series):
-            df = df.to_frame(name=self.target).lazy()
+        # if isinstance(df, pl.Series):
+        #     df = df.to_frame(name=self.target).lazy()
 
-        if self.timestamp:
+        if not self.assume_resampled and self.timestamp:
             df = df.with_columns(pl.col(self.timestamp).dt.round(self.freq))
 
         if not self.assume_sorted:
@@ -433,8 +446,11 @@ class PolarsDataset(DataFrameDataset):
 
         target_len = df.select(pl.len()).collect().item() 
         target = df.select(pl.col(self.target).slice(0, target_len - self.future_length))
-        entry["target"] = np.squeeze(target.collect().to_numpy().T)
-
+        
+        # entry["target"] = np.squeeze(target.collect().to_numpy().T)
+        # entry["target"] = self.iterate_df(target, target_len - self.future_length)
+        entry["target"] = target
+        
         if item_id is not None:
             entry["item_id"] = item_id
 
@@ -445,15 +461,29 @@ class PolarsDataset(DataFrameDataset):
             entry["feat_static_real"] = self._static_reals[item_id].values
 
         if self.num_feat_dynamic_real > 0:
-            entry["feat_dynamic_real"] = df.select(pl.col(self.feat_dynamic_real)).collect().to_numpy().T
+            feat_dynamic_real = df.select(pl.col(self.feat_dynamic_real))
+            # entry["feat_dynamic_real"] = feat_dynamic_real.collect().to_numpy().T
+            # entry["feat_dynamic_real"] = self.iterate_df(feat_dynamic_real, target_len)
+            # entry["feat_dynamic_real"] = self.iterate_df(feat_dynamic_real, target_len)
+            entry["feat_dynamic_real"] = feat_dynamic_real
 
         if self.num_past_feat_dynamic_real > 0:
-            past_feat_dynamic_real_len = df.select(pl.len()).collect().item() # TODO same as target_len? 
+            past_feat_dynamic_real_len = df.select(pl.len()).collect().item() # TODO same as target_len?
             past_feat_dynamic_real = df.select(pl.col(self.past_feat_dynamic_real).slice(0, past_feat_dynamic_real_len - self.future_length))
-            entry["past_feat_dynamic_real"] = past_feat_dynamic_real.collect().to_numpy().T
+            # entry["past_feat_dynamic_real"] = past_feat_dynamic_real.collect().to_numpy().T
+            # entry["past_feat_dynamic_real"] = self.iterate_df(past_feat_dynamic_real, past_feat_dynamic_real_len - self.future_length) 
+            entry["past_feat_dynamic_real"] = past_feat_dynamic_real
 
         return entry
 
+    def iterate_df(self, df, length):
+        i = 0
+        while i < length:
+            yield df.select(pl.all().slice(i, 1)).collect().to_numpy().T
+            if i == length - 1:
+                i = 0
+            else:
+                i += 1
 
     @classmethod
     def from_long_dataframe(
@@ -583,3 +613,175 @@ def is_uniform(index: Union[pd.PeriodIndex, pl.DataFrame, pl.LazyFrame]) -> bool
         return index.select((pl.all().diff().slice(1) == freq).all()).collect().item()
     else:
         return bool(np.all(np.diff(index.asi8) == index.freq.n))
+
+class IterableLazyFrame:
+    def __init__(self, data=None, data_path=None, schema=None, target_cols=None, dtype=None):
+        
+        if data_path is not None and data is None:
+            self._df = pl.scan_parquet(data_path, schema=schema)
+        elif data is not None and data_path is None:
+            self._df = pl.LazyFrame(data, schema=schema)
+        else:
+            raise Exception("Must pass either argument 'data' or 'data_path', but not both.")
+        # TODO make sure data types here match what is set in estimator add time features etc 
+        if dtype is not None:
+            self._df = self._df.with_columns(cs.float().cast(dtype))
+        
+        self.target_cols = target_cols
+        self.i = 0
+        self._length = self._df.select(pl.len()).collect().item()
+        self._shape = (len(self._df.collect_schema().names()), self._length)
+        # self.dtype = list(self._df.select(target_cols).collect_schema().values())[0]
+    
+    def __getattr__(self, name):
+        # Delegate attribute access to the underlying LazyFrame
+        attr = getattr(self._df, name)
+        
+        # If the attribute is a callable (a method), we need to bind it
+        # to the MyLazyFrame instance to maintain the correct context
+        if callable(attr):
+            def wrapper(*args, **kwargs):
+                result = attr(*args, **kwargs)
+                if isinstance(result, pl.LazyFrame):
+                    return IterableLazyFrame._from_lazyframe(result, self.target_cols) # maintain iterableLazyFrame type
+                else:
+                    return result
+            return wrapper
+        else:
+            return attr
+    
+    def __getitem__(self, key):
+        if isinstance(key, slice):
+            start = key.start or 0
+            stop = key.stop or self.length
+            return self._df.slice(start, stop - start).collect().to_numpy().T
+        elif isinstance(key[1], slice):
+            start = key[1].start or 0
+            stop = key[1].stop or self.length
+            return self._df.slice(start, stop - start).collect().to_numpy().T # to avoid ellipsis
+        else:
+            return self._df.slice(key, 1).collect().to_numpy().T
+    
+    # def __setitem__(self, key, value):
+    #     if isinstance(key, slice):
+    #         self._df = self._df
+    
+    @classmethod
+    def _from_lazyframe(cls, df: pl.LazyFrame, target_cols):
+        inst = cls.__new__(cls)
+        inst._df = df
+        inst._length = df.select(pl.len()).collect().item()
+        inst._shape = (len(df.collect_schema().names()), inst._length)
+        inst.i = 0 # TODO should it be set to old index...
+        # inst.dtype = list(df.select(target_cols).collect_schema().values())[0]
+        inst.target_cols = target_cols
+        return inst
+    
+    def __iter__(self):
+        while self.i < self.length:
+            yield self.select(pl.all().slice(self.i, 1)).collect().to_numpy().T
+            if self.i == self.length - 1:
+                self.i = 0
+            else:
+                self.i += 1
+    
+    @property
+    def length(self):
+        return self._length
+
+    @property
+    def shape(self):
+        return self._shape
+    
+    @property
+    def dtype(self):
+        return list(self._df.select(self.target_cols).collect_schema().values())[0]
+    
+    # def __len__(self):
+    #     return self.length
+
+def concat_lazyframes(items: Iterable[IterableLazyFrame],
+                        *,
+                        how: ConcatMethod = "vertical",
+                        rechunk: bool = False,
+                        parallel: bool = True):
+    
+    elems = list(items)
+
+    if not elems:
+        msg = "cannot concat empty list"
+        raise ValueError(msg)
+    elif len(elems) == 1 and isinstance(
+        elems[0], (pl.DataFrame, pl.Series, pl.LazyFrame)
+    ):
+        return elems[0]
+
+    if how == "align":
+        if not isinstance(elems[0], (pl.DataFrame, pl.LazyFrame)):
+            msg = f"'align' strategy is not supported for {type(elems[0]).__name__!r}"
+            raise TypeError(msg)
+
+        # establish common columns, maintaining the order in which they appear
+        all_columns = list(chain.from_iterable(e.collect_schema() for e in elems))
+        key = {v: k for k, v in enumerate(ordered_unique(all_columns))}
+        common_cols = sorted(
+            reduce(
+                lambda x, y: set(x) & set(y),  # type: ignore[arg-type, return-value]
+                chain(e.collect_schema() for e in elems),
+            ),
+            key=lambda k: key.get(k, 0),
+        )
+        # we require at least one key column for 'align'
+        if not common_cols:
+            msg = "'align' strategy requires at least one common column"
+            raise InvalidOperationError(msg)
+
+        # align the frame data using a full outer join with no suffix-resolution
+        # (so we raise an error in case of column collision, like "horizontal")
+        lf: pl.LazyFrame = reduce(
+            lambda x, y: (
+                x.join(y, how="full", on=common_cols, suffix="_PL_CONCAT_RIGHT")
+                # Coalesce full outer join columns
+                .with_columns(
+                    F.coalesce([name, f"{name}_PL_CONCAT_RIGHT"])
+                    for name in common_cols
+                )
+                .drop([f"{name}_PL_CONCAT_RIGHT" for name in common_cols])
+            ),
+            [df.lazy() for df in elems],
+        ).sort(by=common_cols)
+
+        eager = isinstance(elems[0], pl.DataFrame)
+        return lf.collect() if eager else IterableLazyFrame(data=lf.collect())  # type: ignore[return-value]
+
+    first = elems[0]
+    
+    if how in ("vertical", "vertical_relaxed"):
+        return IterableLazyFrame(data=wrap_ldf(
+            plr.concat_lf(
+                elems,
+                rechunk=rechunk,
+                parallel=parallel,
+                to_supertypes=how.endswith("relaxed"),
+            )
+        ).collect())
+    elif how in ("diagonal", "diagonal_relaxed"):
+        return IterableLazyFrame(data=wrap_ldf(
+            plr.concat_lf_diagonal(
+                elems,
+                rechunk=rechunk,
+                parallel=parallel,
+                to_supertypes=how.endswith("relaxed"),
+            )
+        ).collect())
+    elif how == "horizontal":
+        return IterableLazyFrame(data=wrap_ldf(
+            plr.concat_lf_horizontal(
+                elems,
+                parallel=parallel,
+            )).collect()
+        )
+    else:
+        allowed = ", ".join(repr(m) for m in get_args(ConcatMethod))
+        msg = f"LazyFrame `how` must be one of {{{allowed}}}, got {how!r}"
+        raise ValueError(msg)

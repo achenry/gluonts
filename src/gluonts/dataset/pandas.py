@@ -624,14 +624,15 @@ class IterableLazyFrame:
         else:
             raise Exception("Must pass either argument 'data' or 'data_path', but not both.")
         # TODO make sure data types here match what is set in estimator add time features etc 
+        # self.dtype = list(self._df.select(cs.float()).collect_schema().values())[0]
         if dtype is not None:
             self._df = self._df.with_columns(cs.float().cast(dtype))
-        
+        # self.dtype = dtype
         self.target_cols = target_cols
-        self.i = 0
+        # self.i = 0
         self._length = self._df.select(pl.len()).collect().item()
         self._shape = (len(self._df.collect_schema().names()), self._length)
-        # self.dtype = list(self._df.select(target_cols).collect_schema().values())[0]
+        
     
     def __getattr__(self, name):
         # Delegate attribute access to the underlying LazyFrame
@@ -672,18 +673,18 @@ class IterableLazyFrame:
         inst._df = df
         inst._length = df.select(pl.len()).collect().item()
         inst._shape = (len(df.collect_schema().names()), inst._length)
-        inst.i = 0 # TODO should it be set to old index...
-        # inst.dtype = list(df.select(target_cols).collect_schema().values())[0]
+        # inst.i = 0 # TODO should it be set to old index...
+        # inst.dtype = list(df.select(cs.float()).collect_schema().values())[0]
         inst.target_cols = target_cols
         return inst
     
-    def __iter__(self):
-        while self.i < self.length:
-            yield self.select(pl.all().slice(self.i, 1)).collect().to_numpy().T
-            if self.i == self.length - 1:
-                self.i = 0
-            else:
-                self.i += 1
+    # def __iter__(self):
+    #     while self.i < self.length:
+    #         yield self.select(pl.all().slice(self.i, 1)).collect().to_numpy().T
+    #         if self.i == self.length - 1:
+    #             self.i = 0
+    #         else:
+    #             self.i += 1
     
     @property
     def length(self):
@@ -695,7 +696,7 @@ class IterableLazyFrame:
     
     @property
     def dtype(self):
-        return list(self._df.select(self.target_cols).collect_schema().values())[0]
+        return list(self._df.select(cs.float()).collect_schema().values())[0]
     
     # def __len__(self):
     #     return self.length

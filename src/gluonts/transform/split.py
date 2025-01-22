@@ -129,7 +129,7 @@ class InstanceSplitter(FlatMapTransformation):
 
     def _split_instance(self, entry: DataEntry, idx: int) -> DataEntry:
         slice_cols = self.ts_fields + [self.target_field]
-        dtype = entry[self.target_field].dtype
+        dtype = entry[self.target_field].dtype.to_python()
 
         entry = entry.copy()
 
@@ -149,13 +149,10 @@ class InstanceSplitter(FlatMapTransformation):
             del entry[ts_field]
 
         pad_length = max(self.past_length - idx, 0)
-        if isinstance(entry[self._past(self.target_field)], np.ndarray):
-            # numpy or native type
-            pad_indicator = np.zeros(self.past_length, dtype=dtype)
-            pad_indicator[:pad_length] = 1
-        else:
-            pad_indicator = np.zeros(self.past_length, dtype=dtype.to_python())
-            pad_indicator[:pad_length] = 1
+        pad_indicator = np.zeros(self.past_length, dtype=dtype)
+        pad_indicator[:pad_length] = 1
+        
+        if isinstance(entry[self._past(self.target_field)], IterableLazyFrame):
             pad_indicator = IterableLazyFrame(data=pad_indicator)
 
         entry[self._past(self.is_pad_field)] = pad_indicator

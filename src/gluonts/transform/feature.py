@@ -84,8 +84,6 @@ class DummyValueImputation(MissingValueImputation):
             values[nan_indices] = self.dummy_value
         elif isinstance(values, pl.LazyFrame):
             values = values.fill_nan(None).fill_null(self.dummy_value)
-        else:
-            raise Exception()
         return values
 
 
@@ -272,11 +270,11 @@ class AddObservedValuesIndicator(SimpleTransformation):
             if self.imputation_method is not None:
                 if nan_entries.select(pl.any_horizontal(pl.all().any())).collect().item():
                     data[self.target_field] = self.imputation_method(value)
-                    
-            data[self.output_field] = nan_entries.select(pl.all().not_().cast(self.dtype))
-            return data
         else:
-            raise Exception()
+            raise Exception(f"data[{self.target_field}] is of type {type(value)} and equals {value}")
+                    
+        data[self.output_field] = nan_entries.select(pl.all().not_().cast(self.dtype))
+        return data
 
 
 class AddConstFeature(MapTransformation):
@@ -382,7 +380,7 @@ class AddTimeFeatures(MapTransformation):
         elif isinstance(data[self.target_field], IterableLazyFrame): # check if IterableLazyFrame
             length = data[self.target_field].length + (0 if is_train else self.pred_length)
         else:
-            raise Exception()
+            raise Exception(f"data[{self.target_field}] is of type {type(data[self.target_field])} and equals {data[self.target_field]}")
 
         index = pd.period_range(start, periods=length, freq=start.freq)
 
@@ -441,7 +439,7 @@ class AddAgeFeature(MapTransformation):
         elif isinstance(data[self.target_field], IterableLazyFrame): # check if IterableLazyFrame 
             length = data[self.target_field].length + (0 if is_train else self.pred_length)
         else:
-            raise Exception()
+            raise Exception(f"data[{self.target_field}] is of type {type(data[self.target_field])} and equals {data[self.target_field]}")
 
         if self.log_scale:
             age = np.log10(2.0 + np.arange(length, dtype=self.dtype))

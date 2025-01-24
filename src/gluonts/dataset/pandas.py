@@ -19,6 +19,7 @@ from typing import Any, Iterable, Optional, Type, Union, get_args
 
 import numpy as np
 import pandas as pd
+import torch
 
 import polars as pl
 import polars.polars as plr
@@ -656,12 +657,15 @@ class IterableLazyFrame:
             start = key.start or 0
             stop = key.stop or self.length
             return self._df.slice(start, stop - start).collect().to_numpy().T
+            # return torch.from_numpy(self._df.slice(start, stop - start).collect().to_numpy().T)
         elif isinstance(key[1], slice):
             start = key[1].start or 0
             stop = key[1].stop or self.length
             return self._df.slice(start, stop - start).collect().to_numpy().T # to avoid ellipsis
+            # return torch.from_numpy(self._df.slice(start, stop - start).collect().to_numpy().T) # to avoid ellipsis
         else:
             return self._df.slice(key, 1).collect().to_numpy().T
+            # return torch.from_numpy(self._df.slice(key, 1).collect().to_numpy().T)
     
     # def __setitem__(self, key, value):
     #     if isinstance(key, slice):

@@ -269,11 +269,15 @@ class AddObservedValuesIndicator(SimpleTransformation):
             nan_entries = value.select((pl.all().is_null() | pl.all().is_nan()).cast(pl.Boolean))
             if self.imputation_method is not None:
                 if nan_entries.select(pl.any_horizontal(pl.all().any())).collect().item():
+                    print(f"feature.py line 272 with value {value}")
                     data[self.target_field] = self.imputation_method(value)
+                    print(f"and new value {data[self.target_field]}")
+                    
+            data[self.output_field] = nan_entries.select(pl.all().not_().cast(self.dtype))
         else:
             raise Exception(f"data[{self.target_field}] is of type {type(value)} and equals {value}")
                     
-        data[self.output_field] = nan_entries.select(pl.all().not_().cast(self.dtype))
+        
         return data
 
 

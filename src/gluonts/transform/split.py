@@ -129,7 +129,10 @@ class InstanceSplitter(FlatMapTransformation):
 
     def _split_instance(self, entry: DataEntry, idx: int) -> DataEntry:
         slice_cols = self.ts_fields + [self.target_field]
-        dtype = entry[self.target_field].dtype.to_python()
+        if isinstance(entry[self.target_field], IterableLazyFrame):
+            dtype = entry[self.target_field].dtype.to_python()
+        else:
+            dtype = entry[self.target_field].dtype
 
         entry = entry.copy()
 

@@ -223,13 +223,13 @@ class DistributionForecastGenerator(ForecastGenerator):
     ) -> Iterator[Forecast]:
         for batch in inference_data_loader:
             inputs = select(input_names, batch, ignore_missing=True)
-            outputs = make_predictions(prediction_net, inputs, output_distr_params=output_distr_params) # calls forward in module.py CHANGE
+            outputs = make_predictions(prediction_net, inputs, output_distr_params=output_distr_params) # TODO just set output_distr_params to False? calls forward in module.py CHANGE
 
             if output_transform:
                 log_once(OUTPUT_TRANSFORM_NOT_SUPPORTED_MSG)
             if num_samples:
                 log_once(NOT_SAMPLE_BASED_MSG)
-                
+            
             distributions = [
                 self.distr_output.distribution(distr_args=u) for u in _unpack(outputs) # CHANGE
             ]

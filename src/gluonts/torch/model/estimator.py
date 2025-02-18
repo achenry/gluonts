@@ -247,7 +247,7 @@ class PyTorchLightningEstimator(Estimator):
         cache_data: bool = False,
         ckpt_path: Optional[str] = None,
         **kwargs,
-    ) -> PyTorchPredictor:
+    ) -> TrainOutput:
         return self.train_model(
             training_data,
             validation_data,
@@ -255,7 +255,7 @@ class PyTorchLightningEstimator(Estimator):
             cache_data=cache_data,
             ckpt_path=ckpt_path,
             **kwargs # CHANGE
-        ).predictor
+        ) # CHANGE
 
     def train_from(
         self,
@@ -265,7 +265,7 @@ class PyTorchLightningEstimator(Estimator):
         shuffle_buffer_length: Optional[int] = None,
         cache_data: bool = False,
         ckpt_path: Optional[str] = None,
-    ) -> PyTorchPredictor:
+    ) -> TrainOutput:
         assert isinstance(predictor, PyTorchPredictor)
         return self.train_model(
             training_data,
@@ -274,4 +274,4 @@ class PyTorchLightningEstimator(Estimator):
             shuffle_buffer_length=shuffle_buffer_length,
             cache_data=cache_data,
             ckpt_path=ckpt_path,
-        ).predictor
+        ) # CHANGE

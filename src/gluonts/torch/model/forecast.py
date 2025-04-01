@@ -141,8 +141,42 @@ class DistributionForecast(Forecast):
                 f" target_dim={target_dim}"
             )
             # distribution = self.distribution[:, :, dim]
-            distribution = self.distribution.__class__(
-                **{param_key: getattr(self.distribution, param_key)[:, dim] for param_key in self.distribution.arg_constraints.keys()}) 
+
+            # --- Debugging Cholesky ---
+            import logging
+            import torch
+            try:
+                required_params = self.distribution.arg_constraints.keys()
+                original_params = {
+                    param_key: getattr(self.distribution, param_key)
+                    for param_key in required_params
+                    if hasattr(self.distribution, param_key) # Check if attribute exists
+                }
+                # Slice parameters *before* passing them to the constructor
+                sliced_params = {
+                    param_key: original_params[param_key][:, dim]
+                    for param_key in original_params
+                }
+
+                logging.info(f"copy_dim(dim={dim}): Reconstructing {self.distribution.__class__.__name__}")
+                for param_key, tensor in original_params.items():
+                    logging.info(f"  Original {param_key} shape: {tensor.shape}, has NaNs: {torch.isnan(tensor).any()}, has Infs: {torch.isinf(tensor).any()}")
+                for param_key, tensor in sliced_params.items():
+                    logging.info(f"  Sliced {param_key} shape: {tensor.shape}, has NaNs: {torch.isnan(tensor).any()}, has Infs: {torch.isinf(tensor).any()}")
+
+                # Specifically log cov_diag if it exists, as it's crucial for positive-definiteness
+                if 'cov_diag' in sliced_params:
+                    diag_tensor = sliced_params['cov_diag']
+                    logging.info(f"  Sliced cov_diag values (shape {diag_tensor.shape}): {diag_tensor.flatten()}")
+                    if torch.any(diag_tensor <= 1e-6): # Check for non-positive or very small values
+                         logging.warning(f"  WARNING: Sliced cov_diag contains non-positive or near-zero values!")
+
+            except Exception as log_ex:
+                logging.error(f"copy_dim(dim={dim}): Error during debug logging: {log_ex}")
+            # --- End Debugging ---
+
+            # Pass the pre-sliced parameters
+            distribution = self.distribution.__class__(**sliced_params)
 
         return DistributionForecast(
             distribution=distribution,

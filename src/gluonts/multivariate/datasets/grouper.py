@@ -72,7 +72,7 @@ class Grouper:
         for data in dataset:
             timestamp = data['start'].to_timestamp() # CHANGE
             self.first_timestamp = min(self.first_timestamp, timestamp)
-            self.last_timestamp = min( # CHANGE from max
+            self.last_timestamp = max(
                 self.last_timestamp, timestamp + pd.to_timedelta(str(len(data["target"])) + self.frequency)
             )
             self.frequency = (

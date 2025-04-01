@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field, InitVar
 from typing import Any, Iterable, Optional, Type, Union, get_args
+from types import EllipsisType
 
 import numpy as np
 import pandas as pd
@@ -656,15 +657,21 @@ class IterableLazyFrame:
         if isinstance(key, slice):
             start = key.start or 0
             stop = key.stop or self.length
-            return self._df.slice(start, stop - start).collect().to_numpy().T
+            return np.ascontiguousarray(self._df.slice(start, stop - start).collect().to_numpy().T.squeeze())
             # return torch.from_numpy(self._df.slice(start, stop - start).collect().to_numpy().T)
-        elif isinstance(key[1], slice):
-            start = key[1].start or 0
-            stop = key[1].stop or self.length
-            return self._df.slice(start, stop - start).collect().to_numpy().T # to avoid ellipsis
+        elif isinstance(key[1], slice) and (isinstance(key[0], EllipsisType) or (isinstance(key[0], slice) and (slice.start is None and slice.stop is None and slice.step is None))):
+            start = key[1].start if key[1].start is not None else 0
+            stop = key[1].stop if key[1].stop is not None else self.length
+            return np.ascontiguousarray(self._df.slice(start, stop - start).collect().to_numpy().T.squeeze()) # to avoid ellipsis
             # return torch.from_numpy(self._df.slice(start, stop - start).collect().to_numpy().T) # to avoid ellipsis
+        elif isinstance(key[0], slice) and isinstance(key[1], slice):
+            col_start = key[0].start if key[0].start is not None else 0
+            col_stop = key[0].stop if key[0].stop is not None else len(self._df.collect_schema())
+            time_start = key[1].start if key[1].start is not None else 0
+            time_stop = key[1].stop if key[1].stop is not None else self.length
+            return np.ascontiguousarray(self._df.slice(time_start, time_stop - time_start).collect().to_numpy().T[col_start:col_stop].squeeze())
         else:
-            return self._df.slice(key, 1).collect().to_numpy().T
+            return np.ascontiguousarray(self._df.slice(key, 1).collect().to_numpy().T.squeeze())
             # return torch.from_numpy(self._df.slice(key, 1).collect().to_numpy().T)
     
     # def __setitem__(self, key, value):

@@ -173,6 +173,7 @@ class PyTorchLightningEstimator(Estimator):
                 training_network,
                 shuffle_buffer_length=shuffle_buffer_length,
             )
+            # x = next(iter(training_data_loader))
             
         validation_data_loader = None
 

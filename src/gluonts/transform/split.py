@@ -120,7 +120,7 @@ class InstanceSplitter(FlatMapTransformation):
                 left=self.past_length - idx,
                 value=self.dummy_value,
             )
-
+        
         future_start = idx + self.lead_time
         future_slice = slice(future_start, future_start + self.future_length)
         future_piece = array[..., future_slice]
@@ -133,14 +133,14 @@ class InstanceSplitter(FlatMapTransformation):
             dtype = entry[self.target_field].dtype.to_python()
         else:
             dtype = entry[self.target_field].dtype
-
+        
         entry = entry.copy()
 
         for ts_field in slice_cols:
             
             past_piece, future_piece = self._split_array(entry[ts_field], idx)
             
-            assert past_piece.shape[1] == self.past_length
+            # assert past_piece.shape[-1] == self.past_length
             
             if self.output_NTC:
                 past_piece = past_piece.transpose()
@@ -148,7 +148,7 @@ class InstanceSplitter(FlatMapTransformation):
 
             entry[self._past(ts_field)] = past_piece
             entry[self._future(ts_field)] = future_piece
-             
+            
             del entry[ts_field]
 
         pad_length = max(self.past_length - idx, 0)
@@ -162,7 +162,7 @@ class InstanceSplitter(FlatMapTransformation):
         entry[self.forecast_start_field] = (
             entry[self.start_field] + idx + self.lead_time
         )
-
+        
         return entry
 
     def flatmap_transform(

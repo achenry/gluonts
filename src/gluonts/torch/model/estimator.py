@@ -15,7 +15,8 @@ from typing import NamedTuple, Optional, Iterable, Dict, Any
 import logging
 
 import numpy as np
-import pytorch_lightning as pl # CHANGE
+# Use the newer namespace consistent with Lightning > v2.0
+import lightning.pytorch as pl
 import torch.nn as nn
 
 from gluonts.core.component import validated

@@ -20,7 +20,7 @@ from types import EllipsisType
 
 import numpy as np
 import pandas as pd
-import torch
+from line_profiler import profile
 
 import polars as pl
 import polars.polars as plr
@@ -617,7 +617,8 @@ def is_uniform(index: Union[pd.PeriodIndex, pl.DataFrame, pl.LazyFrame]) -> bool
         return bool(np.all(np.diff(index.asi8) == index.freq.n))
 
 class IterableLazyFrame:
-    def __init__(self, data=None, data_path=None, schema=None, target_cols=None, dtype=None):
+    @profile
+    def __init__(self, data=None, data_path=None, schema=None, target_cols=None, dtype=None, load=False):
         
         if data_path is not None and data is None:
             self._df = pl.scan_parquet(data_path, schema=schema)
@@ -625,6 +626,10 @@ class IterableLazyFrame:
             self._df = pl.LazyFrame(data, schema=schema)
         else:
             raise Exception("Must pass either argument 'data' or 'data_path', but not both.")
+        
+        if load:
+            self._df = self._df.collect()
+        self.is_loaded = load
         # TODO make sure data types here match what is set in estimator add time features etc 
         # self.dtype = list(self._df.select(cs.float()).collect_schema().values())[0]
         if dtype is not None:
@@ -632,10 +637,13 @@ class IterableLazyFrame:
         # self.dtype = dtype
         self.target_cols = target_cols
         # self.i = 0
-        self._length = self._df.select(pl.len()).collect().item()
+        if self.is_loaded:
+            self._length = self._df.select(pl.len()).item() 
+        else:
+            self._length = self._df.select(pl.len()).collect().item()
         self._shape = (len(self._df.collect_schema().names()), self._length)
         
-    
+    @profile
     def __getattr__(self, name):
         # Delegate attribute access to the underlying LazyFrame
         attr = getattr(self._df, name)
@@ -647,31 +655,49 @@ class IterableLazyFrame:
                 result = attr(*args, **kwargs)
                 if isinstance(result, pl.LazyFrame):
                     return IterableLazyFrame._from_lazyframe(result, self.target_cols) # maintain iterableLazyFrame type
+                elif isinstance(result, pl.DataFrame):
+                    return IterableLazyFrame._from_dataframe(result, self.target_cols) # maintain iterableDataFrame type
                 else:
                     return result
             return wrapper
         else:
             return attr
     
+    @profile
     def __getitem__(self, key):
         if isinstance(key, slice):
             start = key.start or 0
             stop = key.stop or self.length
-            return np.ascontiguousarray(self._df.slice(start, stop - start).collect().to_numpy().T.squeeze())
+            sub_df = self._df.slice(start, stop - start)
+            if self.is_loaded:
+                return sub_df.to_numpy().T.squeeze()
+            else:
+                return sub_df.collect().to_numpy().T.squeeze()
             # return torch.from_numpy(self._df.slice(start, stop - start).collect().to_numpy().T)
         elif isinstance(key[1], slice) and (isinstance(key[0], EllipsisType) or (isinstance(key[0], slice) and (slice.start is None and slice.stop is None and slice.step is None))):
             start = key[1].start if key[1].start is not None else 0
             stop = key[1].stop if key[1].stop is not None else self.length
-            return np.ascontiguousarray(self._df.slice(start, stop - start).collect().to_numpy().T.squeeze()) # to avoid ellipsis
+            sub_df = self._df.slice(start, stop - start)
+            if self.is_loaded:
+                return sub_df.to_numpy().T.squeeze() # to avoid ellipsis
+            else:
+                return sub_df.collect().to_numpy().T.squeeze() # to avoid ellipsis
             # return torch.from_numpy(self._df.slice(start, stop - start).collect().to_numpy().T) # to avoid ellipsis
         elif isinstance(key[0], slice) and isinstance(key[1], slice):
             col_start = key[0].start if key[0].start is not None else 0
             col_stop = key[0].stop if key[0].stop is not None else len(self._df.collect_schema())
             time_start = key[1].start if key[1].start is not None else 0
             time_stop = key[1].stop if key[1].stop is not None else self.length
-            return np.ascontiguousarray(self._df.slice(time_start, time_stop - time_start).collect().to_numpy().T[col_start:col_stop].squeeze())
+            sub_df = self._df.slice(time_start, time_stop - time_start)
+            if self.is_loaded:
+                return sub_df.to_numpy().T[col_start:col_stop].squeeze()
+            else:
+                return sub_df.collect().to_numpy().T[col_start:col_stop].squeeze()
         else:
-            return np.ascontiguousarray(self._df.slice(key, 1).collect().to_numpy().T.squeeze())
+            if self.is_loaded:
+                return self._df.slice(key, 1).to_numpy().T.squeeze()
+            else:
+                return self._df.slice(key, 1).collect().to_numpy().T.squeeze()
             # return torch.from_numpy(self._df.slice(key, 1).collect().to_numpy().T)
     
     # def __setitem__(self, key, value):
@@ -687,8 +713,19 @@ class IterableLazyFrame:
         # inst.i = 0 # TODO should it be set to old index...
         # inst.dtype = list(df.select(cs.float()).collect_schema().values())[0]
         inst.target_cols = target_cols
+        inst.is_loaded = False
         return inst
     
+    @classmethod
+    def _from_dataframe(cls, df: pl.DataFrame, target_cols):
+        inst = cls.__new__(cls)
+        inst._df = df
+        inst._length = df.select(pl.len()).item()
+        inst._shape = (len(df.collect_schema().names()), inst._length)
+        inst.target_cols = target_cols
+        inst.is_loaded = True
+        return inst
+     
     # def __iter__(self):
     #     while self.i < self.length:
     #         yield self.select(pl.all().slice(self.i, 1)).collect().to_numpy().T
@@ -696,7 +733,6 @@ class IterableLazyFrame:
     #             self.i = 0
     #         else:
     #             self.i += 1
-    
     @property
     def length(self):
         return self._length

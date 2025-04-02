@@ -13,6 +13,7 @@
 
 from typing import NamedTuple, Optional, Iterable, Dict, Any
 import logging
+from line_profiler import profile
 
 import numpy as np
 # Use the newer namespace consistent with Lightning > v2.0
@@ -145,6 +146,7 @@ class PyTorchLightningEstimator(Estimator):
         """
         raise NotImplementedError
 
+    @profile
     def train_model(
         self,
         training_data: Dataset,

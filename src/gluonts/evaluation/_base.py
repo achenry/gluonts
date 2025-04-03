@@ -413,11 +413,11 @@ class Evaluator:
             pred_target = np.ma.masked_invalid(pred_target)
 
         try:
-            mean_fcst = getattr(forecast, "mean", None)
+            mean_fcst = getattr(forecast, "mean", None).T # CHANGE need to transpose
         except NotImplementedError:
             mean_fcst = None
 
-        median_fcst = forecast.quantile(0.5)
+        median_fcst = forecast.quantile(0.5).T # CHANGE need to transpose
         seasonal_error = calculate_seasonal_error(
             past_data, forecast.start_date.freqstr, self.seasonality
         )
@@ -481,7 +481,7 @@ class Evaluator:
             )
 
         for quantile in self.quantiles:
-            forecast_quantile = forecast.quantile(quantile.value)
+            forecast_quantile = forecast.quantile(quantile.value).T # CHANGE need to transpose
 
             metrics[f"QuantileLoss[{quantile}]"] = quantile_loss(
                 pred_target, forecast_quantile, quantile.value

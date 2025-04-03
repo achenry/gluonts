@@ -20,7 +20,7 @@ from types import EllipsisType
 
 import numpy as np
 import pandas as pd
-from line_profiler import profile
+
 
 import polars as pl
 import polars.polars as plr
@@ -617,7 +617,7 @@ def is_uniform(index: Union[pd.PeriodIndex, pl.DataFrame, pl.LazyFrame]) -> bool
         return bool(np.all(np.diff(index.asi8) == index.freq.n))
 
 class IterableLazyFrame:
-    @profile
+    
     def __init__(self, data=None, data_path=None, schema=None, target_cols=None, dtype=None, load=False):
         
         if data_path is not None and data is None:
@@ -643,7 +643,7 @@ class IterableLazyFrame:
             self._length = self._df.select(pl.len()).collect().item()
         self._shape = (len(self._df.collect_schema().names()), self._length)
         
-    @profile
+    
     def __getattr__(self, name):
         # Delegate attribute access to the underlying LazyFrame
         attr = getattr(self._df, name)
@@ -663,7 +663,7 @@ class IterableLazyFrame:
         else:
             return attr
     
-    @profile
+    
     def __getitem__(self, key):
         if isinstance(key, slice):
             start = key.start or 0

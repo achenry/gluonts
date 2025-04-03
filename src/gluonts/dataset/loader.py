@@ -56,6 +56,7 @@ class Stack(Transformation, BaseModel):
             yield rows_to_columns(batch, np.array)
 
 
+
 def as_stacked_batches(
     dataset: Dataset,
     *,

@@ -20,8 +20,8 @@ class Grouper:
         self.fill_value = fill_value
 
         self.first_timestamp = pd.Timestamp(2200, 1, 1, 12)
-        # self.last_timestamp = pd.Timestamp(1800, 1, 1, 12)
-        self.last_timestamp = pd.Timestamp(2200, 1, 1, 12)
+        self.last_timestamp = pd.Timestamp(1800, 1, 1, 12)
+        # self.last_timestamp = pd.Timestamp(2200, 1, 1, 12)
         self.frequency = frequency
         self.align_data = align_data
         self.max_target_length = 0

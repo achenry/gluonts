@@ -168,9 +168,9 @@ class PyTorchLightningEstimator(Estimator):
                 transformed_training_data = Cached(transformed_training_data)
 
             training_network = self.create_lightning_module()
-
-            
+            # {p: t.shape for p, t in training_network.named_parameters()}
             training_data_loader = self.create_training_data_loader(
+
                 transformed_training_data,
                 training_network,
                 shuffle_buffer_length=shuffle_buffer_length,

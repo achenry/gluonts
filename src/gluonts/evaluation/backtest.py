@@ -45,7 +45,7 @@ def make_evaluation_predictions(
     dataset: Dataset,
     predictor: Predictor,
     num_samples: int = 100,
-    output_distr_params: Optional[bool] = False # CHANGE
+    output_distr_params: Optional[dict] = {} # CHANGE
 ) -> Tuple[Iterator[Forecast], Iterator[pd.Series]]:
     """
     Returns predictions for the trailing prediction_length observations of the
@@ -64,6 +64,9 @@ def make_evaluation_predictions(
     num_samples
         Number of samples to draw on the model when evaluating. Only
         sampling-based models will use this.
+    output_distr_params
+        dictionary of distribution parameters that evaluator should output,
+        mapping from parameter name in distribution object (e.g. LowRankMultivariateNormlal) to parameter name after AffineTransformation
 
     Returns
     -------

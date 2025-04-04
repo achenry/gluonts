@@ -17,7 +17,6 @@ from torch.distributions import (
     TransformedDistribution,
 )
 
-
 class AffineTransformed(TransformedDistribution):
     """
     Represents the distribution of an affinely transformed random variable.
@@ -56,7 +55,15 @@ class AffineTransformed(TransformedDistribution):
         Returns the variance of the distribution.
         """
         return self.base_dist.variance * self.scale**2
-
+    
+    @property
+    def cov_factor(self):
+        return self.base_dist.cov_factor * self.scale.unsqueeze(-1)
+    
+    @property
+    def cov_diag(self):
+        return self.base_dist.cov_diag * self.scale**2
+        
     @property
     def stddev(self):
         """

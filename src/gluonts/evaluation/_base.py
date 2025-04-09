@@ -29,7 +29,7 @@ from typing import (
     Mapping,
     cast,
 )
-
+import inspect
 import numpy as np
 import pandas as pd
 
@@ -442,11 +442,16 @@ class Evaluator:
                 else:
                     target_fcst = median_fcst
 
+                include_std = "predicted_std" in inspect.signature(eval_fn).parameters.keys() and hasattr(forecast, "distribution") and hasattr(forecast.distribution, "variance")
+                if include_std:
+                    pred_std = np.sqrt(forecast.distribution.variance).numpy()
                 try:
+                    
                     val = {
                         k: eval_fn(
-                            pred_target,
-                            target_fcst,
+                            predicted_mean=pred_target,
+                            true_values=target_fcst,
+                            predicted_std=pred_std
                         )
                     }
                 except Exception:

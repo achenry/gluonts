@@ -146,7 +146,6 @@ class DistributionForecast(Forecast):
             # import logging
             # import torch
             # try:
-            # TODO JUAN is this you?
             required_params = self.distribution.arg_constraints.keys()
             original_params = {
                 param_key: getattr(self.distribution, param_key)
@@ -154,10 +153,12 @@ class DistributionForecast(Forecast):
                 if hasattr(self.distribution, param_key) # Check if attribute exists
             }
             # Slice parameters *before* passing them to the constructor
-            sliced_params = {
-                param_key: original_params[param_key][:, dim]
-                for param_key in original_params
-            }
+            sliced_params = {}
+            for param_key in original_params:
+                if original_params[param_key].ndim > 1 and original_params[param_key].shape[-1] == original_params[param_key].shape[-2] == target_dim:
+                    sliced_params[param_key] = original_params[param_key][..., dim, dim]
+                else:
+                    sliced_params[param_key] = original_params[param_key][..., dim]
 
                 # logging.info(f"copy_dim(dim={dim}): Reconstructing {self.distribution.__class__.__name__}")
                 # for param_key, tensor in original_params.items():
@@ -177,7 +178,12 @@ class DistributionForecast(Forecast):
             # --- End Debugging ---
 
             # Pass the pre-sliced parameters
-            distribution = self.distribution.__class__(**sliced_params)
+            if self.distribution.__class__.__name__ == "MultivariateNormal":
+                del sliced_params["precision_matrix"], sliced_params["scale_tril"]
+                sliced_params["covariance_matrix"] = torch.diag(sliced_params["covariance_matrix"])
+                distribution = self.distribution.__class__(**sliced_params)
+            else:
+                distribution = self.distribution.__class__(**sliced_params)
 
         return DistributionForecast(
             distribution=distribution,

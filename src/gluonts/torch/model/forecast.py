@@ -157,6 +157,8 @@ class DistributionForecast(Forecast):
             for param_key in original_params:
                 if original_params[param_key].ndim > 1 and original_params[param_key].shape[-1] == original_params[param_key].shape[-2] == target_dim:
                     sliced_params[param_key] = original_params[param_key][..., dim, dim]
+                elif original_params[param_key].ndim > 1 and original_params[param_key].shape[-2] == target_dim:
+                    sliced_params[param_key] = original_params[param_key][..., dim, :]
                 else:
                     sliced_params[param_key] = original_params[param_key][..., dim]
 

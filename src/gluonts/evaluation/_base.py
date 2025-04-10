@@ -670,18 +670,12 @@ class MultivariateEvaluator(Evaluator):
         forecast_iterator: Iterator[Forecast], dim: int
     ) -> Iterator[Forecast]:
         # TODO tests
-        # import torch
+        import torch
         import logging
         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
         for f, forecast in enumerate(forecast_iterator):
             logging.info(f"in {f}-th forecast {forecast.item_id} starting at {forecast.start_date}")
-            # logging.info(f"cov_diag min: {torch.min(forecast.distribution.cov_diag)}")
-            # logging.info(f"cov_diag max: {torch.max(forecast.distribution.cov_diag)}")
-            # logging.info(f"cov_diag has NaNs: {torch.isnan(forecast.distribution.cov_diag).any()}")
-            # logging.info(f"cov_diag has Infs: {torch.isinf(forecast.distribution.cov_diag).any()}")
-            # logging.info(f"cov_diag has non-positives: {(forecast.distribution.cov_diag <= 0).any()}")
-            # logging.info(f"cov_factor has NaNs: {torch.isnan(forecast.distribution.cov_factor).any()}")
-            # logging.info(f"cov_factor has Infs: {torch.isinf(forecast.distribution.cov_factor).any()}")
+            logging.info(f"{torch.max(forecast.distribution.cov_diag)}")
             
             yield forecast.copy_dim(dim)
 

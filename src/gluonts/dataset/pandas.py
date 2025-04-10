@@ -30,6 +30,7 @@ from polars._utils.wrap import wrap_ldf
 from polars import functions as F
 from polars.exceptions import InvalidOperationError
 from polars._utils.various import ordered_unique
+from memory_profiler import profile
 
 from functools import reduce
 from itertools import chain
@@ -617,7 +618,7 @@ def is_uniform(index: Union[pd.PeriodIndex, pl.DataFrame, pl.LazyFrame]) -> bool
         return bool(np.all(np.diff(index.asi8) == index.freq.n))
 
 class IterableLazyFrame:
-    
+    @profile
     def __init__(self, data=None, data_path=None, schema=None, target_cols=None, dtype=None, load=False):
         
         if data_path is not None and data is None:

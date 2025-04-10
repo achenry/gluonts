@@ -178,12 +178,15 @@ class DistributionForecast(Forecast):
             # --- End Debugging ---
 
             # Pass the pre-sliced parameters
-            if self.distribution.__class__.__name__ == "MultivariateNormal":
-                del sliced_params["precision_matrix"], sliced_params["scale_tril"]
-                sliced_params["covariance_matrix"] = torch.diag(sliced_params["covariance_matrix"])
-                distribution = self.distribution.__class__(**sliced_params)
-            else:
-                distribution = self.distribution.__class__(**sliced_params)
+            try:
+                if self.distribution.__class__.__name__ == "MultivariateNormal":
+                    del sliced_params["precision_matrix"], sliced_params["scale_tril"]
+                    sliced_params["covariance_matrix"] = torch.diag(sliced_params["covariance_matrix"])
+                    distribution = self.distribution.__class__(**sliced_params)
+                else:
+                    distribution = self.distribution.__class__(**sliced_params)
+            except torch._C._LinAlgError:
+                print("here")
 
         return DistributionForecast(
             distribution=distribution,

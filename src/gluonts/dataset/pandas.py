@@ -618,7 +618,7 @@ def is_uniform(index: Union[pd.PeriodIndex, pl.DataFrame, pl.LazyFrame]) -> bool
         return bool(np.all(np.diff(index.asi8) == index.freq.n))
 
 class IterableLazyFrame:
-    @profile
+    # @profile
     def __init__(self, data=None, data_path=None, schema=None, target_cols=None, dtype=None, load=False):
         
         if data_path is not None and data is None:

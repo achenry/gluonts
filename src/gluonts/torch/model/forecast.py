@@ -187,8 +187,19 @@ class DistributionForecast(Forecast):
                     distribution = self.distribution.__class__(**sliced_params)
                 else:
                     distribution = self.distribution.__class__(**sliced_params)
-            except torch._C._LinAlgError:
-                print("here")
+            except torch._C._LinAlgError as e:
+                import torch
+                import logging
+                logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+                logging.error(e)
+                logging.info(f"cov_diag min: {torch.min(sliced_params['cov_diag'])}")
+                logging.info(f"cov_diag max:", torch.max(sliced_params['cov_diag']))
+                logging.info(f"cov_diag has NaNs: {torch.isnan(sliced_params['cov_diag']).any()}")
+                logging.info(f"cov_diag has Infs: {torch.isinf(sliced_params['cov_diag']).any()}")
+                logging.info(f"cov_diag has non-positives: {(sliced_params['cov_diag'] <= 0).any()}")
+                logging.info(f"cov_factor has NaNs: {torch.isnan(sliced_params['cov_factor']).any()}")
+                logging.info(f"cov_factor has Infs: {torch.isinf(sliced_params['cov_factor']).any()}")
+                raise(e)
 
         return DistributionForecast(
             distribution=distribution,

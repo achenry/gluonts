@@ -669,7 +669,20 @@ class MultivariateEvaluator(Evaluator):
     def extract_forecast_by_dim(
         forecast_iterator: Iterator[Forecast], dim: int
     ) -> Iterator[Forecast]:
-        for forecast in forecast_iterator:
+        # TODO tests
+        # import torch
+        import logging
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+        for f, forecast in enumerate(forecast_iterator):
+            logging.info(f"in {f}-th forecast {forecast.item_id} starting at {forecast.start_date}")
+            # logging.info(f"cov_diag min: {torch.min(forecast.distribution.cov_diag)}")
+            # logging.info(f"cov_diag max: {torch.max(forecast.distribution.cov_diag)}")
+            # logging.info(f"cov_diag has NaNs: {torch.isnan(forecast.distribution.cov_diag).any()}")
+            # logging.info(f"cov_diag has Infs: {torch.isinf(forecast.distribution.cov_diag).any()}")
+            # logging.info(f"cov_diag has non-positives: {(forecast.distribution.cov_diag <= 0).any()}")
+            # logging.info(f"cov_factor has NaNs: {torch.isnan(forecast.distribution.cov_factor).any()}")
+            # logging.info(f"cov_factor has Infs: {torch.isinf(forecast.distribution.cov_factor).any()}")
+            
             yield forecast.copy_dim(dim)
 
     @staticmethod
@@ -795,6 +808,19 @@ class MultivariateEvaluator(Evaluator):
         """
         ts_iterator = iter(ts_iterator)
         fcst_iterator = iter(fcst_iterator)
+        
+        # TESTING START TODO
+        # import torch
+        # x = next(fcst_iterator)
+        # torch.min(x.distribution.cov_diag)
+        # torch.max(x.distribution.cov_diag)
+        # torch.isnan(x.distribution.cov_diag).any()
+        # torch.isinf(x.distribution.cov_diag).any()
+        # torch.all(x.distribution.cov_diag > 0)
+        
+        # torch.isnan(x.distribution.cov_factor).any()
+        # torch.isinf(x.distribution.cov_factor).any()
+        # TESTING END TODO
 
         all_agg_metrics = dict()
         all_metrics_per_ts = list()

@@ -180,6 +180,7 @@ class DistributionForecast(Forecast):
             # --- End Debugging ---
 
             # Pass the pre-sliced parameters
+            
             try:
                 if self.distribution.__class__.__name__ == "MultivariateNormal":
                     del sliced_params["precision_matrix"], sliced_params["scale_tril"]
@@ -188,7 +189,6 @@ class DistributionForecast(Forecast):
                 else:
                     distribution = self.distribution.__class__(**sliced_params)
             except torch._C._LinAlgError as e:
-                import torch
                 import logging
                 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
                 logging.error(e)

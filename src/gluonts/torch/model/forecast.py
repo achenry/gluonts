@@ -161,6 +161,9 @@ class DistributionForecast(Forecast):
                     sliced_params[param_key] = original_params[param_key][..., dim, :]
                 else:
                     sliced_params[param_key] = original_params[param_key][..., dim]
+                
+                # TODO TESTING
+                sliced_params[param_key] = sliced_params[param_key].double()
 
                 # logging.info(f"copy_dim(dim={dim}): Reconstructing {self.distribution.__class__.__name__}")
                 # for param_key, tensor in original_params.items():
@@ -180,6 +183,12 @@ class DistributionForecast(Forecast):
             # --- End Debugging ---
 
             # Pass the pre-sliced parameters
+            
+            # TODO TEST
+            # Disable TF32 for matmul
+            torch.backends.cuda.matmul.allow_tf32 = False
+            # Disable TF32 for cuDNN (less likely relevant here, but good practice)
+            torch.backends.cudnn.allow_tf32 = False
             
             try:
                 if self.distribution.__class__.__name__ == "MultivariateNormal":

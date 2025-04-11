@@ -163,7 +163,7 @@ class DistributionForecast(Forecast):
                     sliced_params[param_key] = original_params[param_key][..., dim]
                 
                 # TODO TESTING
-                sliced_params[param_key] = sliced_params[param_key].double()
+                # sliced_params[param_key] = sliced_params[param_key].double()
 
                 # logging.info(f"copy_dim(dim={dim}): Reconstructing {self.distribution.__class__.__name__}")
                 # for param_key, tensor in original_params.items():
@@ -186,29 +186,29 @@ class DistributionForecast(Forecast):
             
             # TODO TEST
             # Disable TF32 for matmul
-            torch.backends.cuda.matmul.allow_tf32 = False
+            # torch.backends.cuda.matmul.allow_tf32 = False
             # Disable TF32 for cuDNN (less likely relevant here, but good practice)
-            torch.backends.cudnn.allow_tf32 = False
+            # torch.backends.cudnn.allow_tf32 = False
             
-            try:
-                if self.distribution.__class__.__name__ == "MultivariateNormal":
-                    del sliced_params["precision_matrix"], sliced_params["scale_tril"]
-                    sliced_params["covariance_matrix"] = torch.diag(sliced_params["covariance_matrix"])
-                    distribution = self.distribution.__class__(**sliced_params)
-                else:
-                    distribution = self.distribution.__class__(**sliced_params)
-            except torch._C._LinAlgError as e:
-                import logging
-                logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-                logging.error(e)
-                logging.info(f"cov_diag min: {torch.min(sliced_params['cov_diag'])}")
-                logging.info(f"cov_diag max: {torch.max(sliced_params['cov_diag'])}")
-                logging.info(f"cov_diag has NaNs: {torch.isnan(sliced_params['cov_diag']).any()}")
-                logging.info(f"cov_diag has Infs: {torch.isinf(sliced_params['cov_diag']).any()}")
-                logging.info(f"cov_diag has non-positives: {(sliced_params['cov_diag'] <= 0).any()}")
-                logging.info(f"cov_factor has NaNs: {torch.isnan(sliced_params['cov_factor']).any()}")
-                logging.info(f"cov_factor has Infs: {torch.isinf(sliced_params['cov_factor']).any()}")
-                raise(e)
+            # try:
+            if self.distribution.__class__.__name__ == "MultivariateNormal":
+                del sliced_params["precision_matrix"], sliced_params["scale_tril"]
+                sliced_params["covariance_matrix"] = torch.diag(sliced_params["covariance_matrix"])
+                distribution = self.distribution.__class__(**sliced_params)
+            else:
+                distribution = self.distribution.__class__(**sliced_params)
+            # except torch._C._LinAlgError as e:
+            #     import logging
+            #     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+            #     logging.error(e)
+            #     logging.info(f"cov_diag min: {torch.min(sliced_params['cov_diag'])}")
+            #     logging.info(f"cov_diag max: {torch.max(sliced_params['cov_diag'])}")
+            #     logging.info(f"cov_diag has NaNs: {torch.isnan(sliced_params['cov_diag']).any()}")
+            #     logging.info(f"cov_diag has Infs: {torch.isinf(sliced_params['cov_diag']).any()}")
+            #     logging.info(f"cov_diag has non-positives: {(sliced_params['cov_diag'] <= 0).any()}")
+            #     logging.info(f"cov_factor has NaNs: {torch.isnan(sliced_params['cov_factor']).any()}")
+            #     logging.info(f"cov_factor has Infs: {torch.isinf(sliced_params['cov_factor']).any()}")
+            #     raise(e)
 
         return DistributionForecast(
             distribution=distribution,

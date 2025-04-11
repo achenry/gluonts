@@ -669,14 +669,7 @@ class MultivariateEvaluator(Evaluator):
     def extract_forecast_by_dim(
         forecast_iterator: Iterator[Forecast], dim: int
     ) -> Iterator[Forecast]:
-        # TODO tests
-        import torch
-        import logging
-        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
         for f, forecast in enumerate(forecast_iterator):
-            logging.info(f"in {f}-th forecast {forecast.item_id} starting at {forecast.start_date}")
-            logging.info(f"{torch.max(forecast.distribution.cov_diag)}")
-            
             yield forecast.copy_dim(dim)
 
     @staticmethod

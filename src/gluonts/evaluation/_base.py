@@ -795,19 +795,6 @@ class MultivariateEvaluator(Evaluator):
         """
         ts_iterator = iter(ts_iterator)
         fcst_iterator = iter(fcst_iterator)
-        
-        # TESTING START TODO
-        # import torch
-        # x = next(fcst_iterator)
-        # torch.min(x.distribution.cov_diag)
-        # torch.max(x.distribution.cov_diag)
-        # torch.isnan(x.distribution.cov_diag).any()
-        # torch.isinf(x.distribution.cov_diag).any()
-        # torch.all(x.distribution.cov_diag > 0)
-        
-        # torch.isnan(x.distribution.cov_factor).any()
-        # torch.isinf(x.distribution.cov_factor).any()
-        # TESTING END TODO
 
         all_agg_metrics = dict()
         all_metrics_per_ts = list()

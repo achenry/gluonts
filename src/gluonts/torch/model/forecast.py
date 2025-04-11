@@ -163,7 +163,7 @@ class DistributionForecast(Forecast):
                     sliced_params[param_key] = original_params[param_key][..., dim]
                 
                 # TODO TESTING
-                # sliced_params[param_key] = sliced_params[param_key].double()
+                sliced_params[param_key] = sliced_params[param_key].double()
 
                 # logging.info(f"copy_dim(dim={dim}): Reconstructing {self.distribution.__class__.__name__}")
                 # for param_key, tensor in original_params.items():

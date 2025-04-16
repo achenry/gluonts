@@ -442,20 +442,34 @@ class Evaluator:
                 else:
                     target_fcst = median_fcst
 
-                include_std = "predicted_std" in inspect.signature(eval_fn).parameters.keys() and hasattr(forecast, "distribution") and hasattr(forecast.distribution, "variance")
-                if include_std:
-                    pred_std = np.sqrt(forecast.distribution.variance).numpy()
+                # check if this eval_fn expects predicted_std
+                include_std = "predicted_std" in inspect.signature(eval_fn).parameters.keys()
+                
                 try:
-                    
-                    val = {
-                        k: eval_fn(
-                            predicted_mean=pred_target,
-                            true_values=target_fcst,
-                            predicted_std=pred_std
-                        )
-                    }
-                except Exception:
-                    logging.warning(f"Error occurred when evaluating {k}.")
+                    # if this eval_fn expects predicted_std and this forecast has variance
+                    if include_std and hasattr(forecast, "distribution") and hasattr(forecast.distribution, "variance"):
+                        pred_std = np.sqrt(forecast.distribution.variance).numpy()
+                        val = {
+                            k: eval_fn(
+                                predicted_mean=pred_target,
+                                true_values=target_fcst,
+                                predicted_std=pred_std
+                            )
+                        }
+                    # elif this eval_fn does not expect predicted_std
+                    elif not include_std:
+                        val = {
+                            k: eval_fn(
+                                predicted_mean=pred_target,
+                                true_values=target_fcst
+                            )
+                        }
+                    # elif this eval_fn does expect predicted_std but the forecaster does not have it
+                    else:
+                        logging.warning(f"Forecaster {forecast.__class__.__name__} does not have distribution.variance parameter.")
+                        val = {k: np.nan}
+                except Exception as e:
+                    logging.warning(f"Error occurred when evaluating {k}: {e}.")
                     val = {k: np.nan}
 
                 metrics.update(val)

@@ -466,7 +466,7 @@ class Evaluator:
                         }
                     # elif this eval_fn does expect predicted_std but the forecaster does not have it
                     else:
-                        logging.warning(f"Forecaster {forecast.__class__.__name__} does not have distribution.variance parameter.")
+                        # logging.warning(f"Forecaster {forecast.__class__.__name__} does not have distribution.variance parameter.")
                         val = {k: np.nan}
                 except Exception as e:
                     logging.warning(f"Error occurred when evaluating {k}: {e}.")

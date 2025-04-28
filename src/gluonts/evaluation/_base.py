@@ -16,6 +16,7 @@ import multiprocessing
 import sys
 from functools import partial
 from itertools import chain, tee
+import warnings
 from typing import (
     Any,
     Callable,
@@ -52,10 +53,11 @@ from .metrics import (
     num_masked_values,
 )
 
+warnings.simplefilter("ignore", category=UserWarning)
 
-def worker_function(evaluator: "Evaluator", inp: tuple):
+def worker_function(evaluator: "Evaluator", include_metrics: list, inp: tuple):
     ts, forecast = inp
-    return evaluator.get_metrics_per_ts(ts, forecast)
+    return evaluator.get_metrics_per_ts(time_series=ts, forecast=forecast, include_metrics=include_metrics)
 
 
 def aggregate_all(
@@ -227,6 +229,7 @@ class Evaluator:
         ts_iterator: Iterable[Union[pd.DataFrame, pd.Series]],
         fcst_iterator: Iterable[Forecast],
         num_series: Optional[int] = None,
+        include_metrics: Optional[list] = None,
     ) -> Tuple[Dict[str, float], pd.DataFrame]:
         """
         Compute accuracy metrics by comparing actual data to the forecasts.
@@ -248,14 +251,13 @@ class Evaluator:
         pd.DataFrame
             DataFrame containing metrics per time series
         """
-        ts_iterator = iter(ts_iterator)
-        fcst_iterator = iter(fcst_iterator)
-
+        ts_it = iter(ts_iterator)
+        fcst_it = iter(fcst_iterator)
+        
         rows = []
-
         with tqdm(
-            zip(ts_iterator, fcst_iterator),
-            total=num_series,
+            zip(ts_it, fcst_it),
+            # total=num_series,
             desc="Running evaluation",
         ) as it, np.errstate(divide="ignore", invalid="ignore"):
             if self.num_workers and not sys.platform == "win32": 
@@ -263,7 +265,7 @@ class Evaluator:
                     initializer=None, processes=self.num_workers
                 )
                 rows = mp_pool.map(
-                    func=partial(worker_function, self),
+                    func=partial(worker_function, self, include_metrics),
                     iterable=iter(it),
                     chunksize=self.chunk_size,
                 )
@@ -271,14 +273,14 @@ class Evaluator:
                 mp_pool.join()
             else:
                 for ts, forecast in it:
-                    rows.append(self.get_metrics_per_ts(ts, forecast))
+                    rows.append(self.get_metrics_per_ts(ts, forecast, include_metrics=include_metrics))
 
         assert not any(
-            True for _ in ts_iterator
+            True for _ in ts_it
         ), "ts_iterator has more elements than fcst_iterator"
 
         assert not any(
-            True for _ in fcst_iterator
+            True for _ in fcst_it
         ), "fcst_iterator has more elements than ts_iterator"
 
         if num_series is not None:
@@ -302,7 +304,7 @@ class Evaluator:
             }
         )
 
-        return self.get_aggregate_metrics(metrics_per_ts)
+        return self.get_aggregate_metrics(metrics_per_ts, include_metrics=include_metrics)
 
     @staticmethod
     def extract_pred_target(
@@ -393,7 +395,7 @@ class Evaluator:
         }
 
     def get_metrics_per_ts(
-        self, time_series: Union[pd.Series, pd.DataFrame], forecast: Forecast
+        self, time_series: Union[pd.Series, pd.DataFrame], forecast: Forecast, include_metrics=None
     ) -> Mapping[str, Union[float, str, None, np.ma.core.MaskedConstant]]:
 
         # CHANGE cannot check quantiles for multivariate distributions
@@ -425,9 +427,11 @@ class Evaluator:
         metrics: Dict[str, Union[float, str, None]] = self.get_base_metrics(
             forecast, pred_target, mean_fcst, median_fcst, seasonal_error
         )
-        metrics["ND"] = cast(float, metrics["abs_error"]) / cast(
-            float, metrics["abs_target_sum"]
-        )
+        
+        if include_metrics is None or "ND" in include_metrics:
+            metrics["ND"] = cast(float, metrics["abs_error"]) / cast(
+                float, metrics["abs_target_sum"]
+            )
 
         if self.custom_eval_fn is not None:
             for k, (eval_fn, _, fcst_type) in self.custom_eval_fn.items():
@@ -474,16 +478,17 @@ class Evaluator:
 
                 metrics.update(val)
 
-        try:
-            metrics["MSIS"] = msis(
-                pred_target,
-                forecast.quantile(self.alpha / 2),
-                forecast.quantile(1.0 - self.alpha / 2),
-                seasonal_error,
-                self.alpha,
-            )
-        except Exception:
-            logging.warning("Could not calculate MSIS metric.")
+        if include_metrics is None or "MSIS" in include_metrics:
+            try:
+                metrics["MSIS"] = msis(
+                    target=pred_target,
+                    lower_quantile=forecast.quantile(self.alpha / 2),
+                    upper_quantile=forecast.quantile(1.0 - self.alpha / 2),
+                    seasonal_error=seasonal_error,
+                    alpha=self.alpha,
+                )
+            except Exception:
+                logging.warning("Could not calculate MSIS metric.")
             metrics["MSIS"] = np.nan
 
         if self.calculate_owa:
@@ -499,21 +504,23 @@ class Evaluator:
                 pred_target, naive_median_forecast, seasonal_error
             )
 
-        for quantile in self.quantiles:
-            forecast_quantile = forecast.quantile(quantile.value).T # CHANGE need to transpose
+        if include_metrics is None or "QuantileLoss" in include_metrics or "Coverage" in include_metrics:
+            for quantile in self.quantiles:
+                forecast_quantile = forecast.quantile(quantile.value).T # CHANGE need to transpose
 
-            metrics[f"QuantileLoss[{quantile}]"] = quantile_loss(
-                pred_target, forecast_quantile, quantile.value
-            )
-            metrics[f"Coverage[{quantile}]"] = coverage(
-                pred_target, forecast_quantile
-            )
+                metrics[f"QuantileLoss[{quantile}]"] = quantile_loss(
+                    pred_target, forecast_quantile, quantile.value
+                )
+                metrics[f"Coverage[{quantile}]"] = coverage(
+                    pred_target, forecast_quantile
+                )
 
         return metrics
 
     def get_aggregate_metrics(
-        self, metric_per_ts: pd.DataFrame
+        self, metric_per_ts: pd.DataFrame, include_metrics: Optional[list] = None
     ) -> Tuple[Dict[str, float], pd.DataFrame]:
+        
         # Define how to aggregate metrics
         agg_funs = {
             "MSE": "mean",
@@ -524,16 +531,20 @@ class Evaluator:
             "MASE": "mean",
             "MAPE": "mean",
             "sMAPE": "mean",
-            "MSIS": "mean",
             "num_masked_target_values": "sum",
         }
+        
+        if include_metrics is None or "MSIS" in include_metrics:
+            agg_funs["MSIS"] = "mean"
+            
         if self.calculate_owa:
             agg_funs["sMAPE_naive2"] = "mean"
             agg_funs["MASE_naive2"] = "mean"
 
-        for quantile in self.quantiles:
-            agg_funs[f"QuantileLoss[{quantile}]"] = "sum"
-            agg_funs[f"Coverage[{quantile}]"] = "mean"
+        if include_metrics is None or "QuantileLoss" in include_metrics or "Coverage" in include_metrics:
+            for quantile in self.quantiles:
+                agg_funs[f"QuantileLoss[{quantile}]"] = "sum"
+                agg_funs[f"Coverage[{quantile}]"] = "mean"
 
         if self.custom_eval_fn is not None:
             for k, (_, agg_type, _) in self.custom_eval_fn.items():
@@ -553,31 +564,33 @@ class Evaluator:
         totals["NRMSE"] = totals["RMSE"] / totals["abs_target_mean"]
         totals["ND"] = totals["abs_error"] / totals["abs_target_sum"]
 
-        for quantile in self.quantiles:
-            totals[f"wQuantileLoss[{quantile}]"] = (
-                totals[f"QuantileLoss[{quantile}]"] / totals["abs_target_sum"]
+        if include_metrics is None or "QuantileLoss" in include_metrics:
+            for quantile in self.quantiles:
+                totals[f"wQuantileLoss[{quantile}]"] = (
+                    totals[f"QuantileLoss[{quantile}]"] / totals["abs_target_sum"]
+                )
+
+            totals["mean_absolute_QuantileLoss"] = np.array(
+                [
+                    totals[f"QuantileLoss[{quantile}]"]
+                    for quantile in self.quantiles
+                ]
+            ).mean()
+
+            totals["mean_wQuantileLoss"] = np.array(
+                [
+                    totals[f"wQuantileLoss[{quantile}]"]
+                    for quantile in self.quantiles
+                ]
+            ).mean()
+
+        if include_metrics is None or "Coverage" in include_metrics:
+            totals["MAE_Coverage"] = np.mean(
+                [
+                    np.abs(totals[f"Coverage[{quantile}]"] - np.array([q.value]))
+                    for q in self.quantiles
+                ]
             )
-
-        totals["mean_absolute_QuantileLoss"] = np.array(
-            [
-                totals[f"QuantileLoss[{quantile}]"]
-                for quantile in self.quantiles
-            ]
-        ).mean()
-
-        totals["mean_wQuantileLoss"] = np.array(
-            [
-                totals[f"wQuantileLoss[{quantile}]"]
-                for quantile in self.quantiles
-            ]
-        ).mean()
-
-        totals["MAE_Coverage"] = np.mean(
-            [
-                np.abs(totals[f"Coverage[{quantile}]"] - np.array([q.value]))
-                for q in self.quantiles
-            ]
-        )
 
         # Compute OWA if required
         if self.calculate_owa:
@@ -636,7 +649,7 @@ class MultivariateEvaluator(Evaluator):
         eval_dims: Optional[List[int]] = None,
         target_agg_funcs: Dict[str, Callable] = {},
         custom_eval_fn: Optional[dict] = None,
-        num_workers: Optional[int] = None,
+        num_workers: Optional[int] = None
     ) -> None:
         """
 
@@ -734,6 +747,7 @@ class MultivariateEvaluator(Evaluator):
         ts_iterator: Iterator[pd.DataFrame],
         forecast_iterator: Iterator[Forecast],
         agg_fun: Callable,
+        include_metrics: Optional[list] = None,
     ) -> Dict[str, float]:
         """
 
@@ -753,6 +767,7 @@ class MultivariateEvaluator(Evaluator):
         agg_metrics, _ = super().__call__(
             self.extract_aggregate_target(ts_iterator, agg_fun),
             self.extract_aggregate_forecast(forecast_iterator, agg_fun),
+            include_metrics=include_metrics
         )
         return agg_metrics
 
@@ -789,6 +804,7 @@ class MultivariateEvaluator(Evaluator):
         ts_iterator: Iterable[pd.DataFrame],
         fcst_iterator: Iterable[Forecast],
         num_series=None,
+        include_metrics=None
     ) -> Tuple[Dict[str, float], pd.DataFrame]:
         """
         Compute accuracy metrics for multivariate forecasts.
@@ -828,6 +844,7 @@ class MultivariateEvaluator(Evaluator):
             agg_metrics, metrics_per_ts = super().__call__(
                 self.extract_target_by_dim(ts_iterator_set[dim], dim),
                 self.extract_forecast_by_dim(fcst_iterator_set[dim], dim),
+                include_metrics=include_metrics
             )
 
             all_metrics_per_ts.append(metrics_per_ts)
@@ -846,6 +863,7 @@ class MultivariateEvaluator(Evaluator):
                     ts_iterator_set[-(index + 1)],
                     fcst_iterator_set[-(index + 1)],
                     agg_fun,
+                    include_metrics=include_metrics
                 )
                 for index, (agg_fun_name, agg_fun) in enumerate(
                     self.target_agg_funcs.items()

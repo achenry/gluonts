@@ -209,7 +209,7 @@ class PyTorchLightningEstimator(Estimator):
 
         # @boujuan Check if a ModelCheckpoint is already provided in custom_callbacks
         has_custom_checkpoint = any(isinstance(cb, pl.callbacks.ModelCheckpoint) for cb in custom_callbacks)
-
+        # TODO test
         # @boujuan Construct the final list of callbacks for the Trainer
         # Only add the default checkpoint if no custom one was provided
         final_callbacks = custom_callbacks if has_custom_checkpoint else [checkpoint] + custom_callbacks

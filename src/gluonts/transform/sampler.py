@@ -45,13 +45,19 @@ class InstanceSampler(BaseModel):
         raise NotImplementedError()
 
 class SequentialSampler(InstanceSampler):
+    """
+    Use full dataset
+    """
+    
     def __call__(self, ts: np.ndarray) -> np.ndarray:
         a, b = self._get_bounds(ts)
+        window_size = b - a + 1
 
-        if a > b:
+        if window_size <= 0:
             return np.array([], dtype=int)
-        # TODO test if this is really generating a rolling window
-        return list(range(a, b + 1))
+
+        indices = np.arange(window_size) + a
+        return indices
 
 class NumInstanceSampler(InstanceSampler):
     """
@@ -142,7 +148,7 @@ class ExpectedNumInstanceSampler(InstanceSampler):
 
     Parameters
     ----------
-
+    
     num_instances
         number of time points to sample per time series on average
     min_instances
@@ -153,7 +159,7 @@ class ExpectedNumInstanceSampler(InstanceSampler):
     min_instances: int = 0
     total_length: int = 0
     n: int = 0
-    # "each time series/ts" is a DataEntry[self.field_name]
+    
     def __call__(self, ts: np.ndarray) -> np.ndarray:
         a, b = self._get_bounds(ts)
         window_size = b - a + 1
@@ -161,15 +167,18 @@ class ExpectedNumInstanceSampler(InstanceSampler):
         if window_size <= 0:
             return np.array([], dtype=int)
 
-        self.n += 1
-        self.total_length += window_size
-        avg_length = self.total_length / self.n
+        self.n += 1 # number of datasets received
+        self.total_length += window_size # total length of all datasets received
+        avg_length = self.total_length / self.n # average length of all datasets received
 
         if avg_length <= 0:
             return np.array([], dtype=int)
 
-        p = self.num_instances / avg_length
-        (indices,) = np.where(np.random.random_sample(window_size) < p)
+        p = self.num_instances / avg_length # probability is given ave number of instances per time series divided by average time series length so far
+        
+        # get random [0,1) floats of size window_size, then get corresponding indices where these floats are less than p
+        # greater self.num_instances/p => greater num. indices, all indices will be selected for case when p=1
+        (indices,) = np.where(np.random.random_sample(window_size) < p) 
         indices += a
         if len(indices) < self.min_instances:
             prefix = np.random.randint(

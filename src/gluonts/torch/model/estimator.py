@@ -229,6 +229,7 @@ class PyTorchLightningEstimator(Estimator):
             ckpt_path=ckpt_path,
         )
 
+        # TODO HIGH this doesn't work for TACTIS...
         if checkpoint.best_model_path != "":
             logger.info(
                 f"Loading best model from {checkpoint.best_model_path}"

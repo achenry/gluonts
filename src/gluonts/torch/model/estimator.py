@@ -170,13 +170,11 @@ class PyTorchLightningEstimator(Estimator):
             training_network = self.create_lightning_module()
             # {p: t.shape for p, t in training_network.named_parameters()}
             training_data_loader = self.create_training_data_loader(
-
                 transformed_training_data,
                 training_network,
                 shuffle_buffer_length=shuffle_buffer_length,
             )
-            # x = next(iter(training_data_loader))
-            
+            # x = sum(1 for _ in training_data_loader)
         validation_data_loader = None
 
         if validation_data is not None:
@@ -209,11 +207,13 @@ class PyTorchLightningEstimator(Estimator):
 
         # @boujuan Check if a ModelCheckpoint is already provided in custom_callbacks
         has_custom_checkpoint = any(isinstance(cb, pl.callbacks.ModelCheckpoint) for cb in custom_callbacks)
-        # TODO test
+        
         # @boujuan Construct the final list of callbacks for the Trainer
         # Only add the default checkpoint if no custom one was provided
         final_callbacks = custom_callbacks if has_custom_checkpoint else [checkpoint] + custom_callbacks
-
+        if has_custom_checkpoint:
+            checkpoint = [cb for cb in custom_callbacks if cb.__class__.__name__ == "ModelCheckpoint"][0]
+            
         trainer = pl.Trainer(
             **{
                 # "accelerator": "auto",
@@ -235,7 +235,8 @@ class PyTorchLightningEstimator(Estimator):
                 f"Loading best model from {checkpoint.best_model_path}"
             )
             best_model = training_network.__class__.load_from_checkpoint(
-                checkpoint.best_model_path
+                checkpoint.best_model_path,
+                strict=False # Allow loading even if save_hyperparameters fails internally
             )
         else:
             best_model = training_network

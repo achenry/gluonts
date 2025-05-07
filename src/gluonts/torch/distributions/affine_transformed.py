@@ -58,7 +58,12 @@ class AffineTransformed(TransformedDistribution):
     
     @property
     def cov_factor(self):
+        # NOTE this is not a perfect transformation, but tends to result in correct variance within 1e-8
         return self.base_dist.cov_factor * self.scale.unsqueeze(-1)
+        # trafo_cov_diag = self.base_dist.cov_diag * self.scale**2
+        # trafo_cov_factor = self.base_dist.cov_factor * self.scale.unsqueeze(-1)
+        # assert torch.isclose((trafo_cov_diag + trafo_cov_factor.pow(2).sum(-1)) - self.variance , torch.tensor(0).double()).all()
+        # assert ((((self.base_dist.cov_diag + self.base_dist.cov_factor.pow(2).sum(-1))*self.scale**2) - self.variance) == 0).all()
     
     @property
     def cov_diag(self):

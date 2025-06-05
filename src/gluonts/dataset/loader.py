@@ -33,7 +33,50 @@ from gluonts.transform import (
     Valmap,
 )
 
+# INFO Distributed training support @boujuan
+try:
+    import torch.distributed as dist
+    TORCH_AVAILABLE = True
+except ImportError:
+    TORCH_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
+
+
+def _is_distributed() -> bool:
+    if not TORCH_AVAILABLE:
+        return False
+    return dist.is_available() and dist.is_initialized()
+
+
+def _get_world_size() -> int:
+    if not _is_distributed():
+        return 1
+    return dist.get_world_size()
+
+
+def _get_rank() -> int:
+    if not _is_distributed():
+        return 0
+    return dist.get_rank()
+
+
+class DistributedShardedIterable:
+    """
+    Wraps an iterable to provide distributed data sharding.    
+    Each process gets a different subset of the data.
+    """
+    
+    def __init__(self, iterable, world_size: int = None, rank: int = None):
+        self.iterable = iterable
+        self.world_size = world_size or _get_world_size()
+        self.rank = rank or _get_rank()
+        
+    def __iter__(self):
+        """Yield every world_size-th item starting from rank."""
+        for i, item in enumerate(self.iterable):
+            if i % self.world_size == self.rank:
+                yield item
 
 
 DataLoader = Iterable[DataBatch]
@@ -65,6 +108,7 @@ def as_stacked_batches(
     num_batches_per_epoch: Optional[int] = None,
     shuffle_buffer_length: Optional[int] = None,
     field_names: Optional[list] = None,
+    distributed: bool = True,
 ):
     """
     Prepare data in batches to be passed to a network.
@@ -82,7 +126,28 @@ def as_stacked_batches(
 
     Setting ``field_names`` will only consider those columns in the input data
     and discard all other values.
+    
+    Parameters
+    ----------
+    distributed : bool, default True
+        Whether to enable distributed training support. When True and running
+        in a distributed environment, data will be automatically sharded across
+        processes to avoid redundant processing.
     """
+
+    # Handle distributed training
+    world_size = 1
+    rank = 0
+    if distributed and _is_distributed():
+        world_size = _get_world_size()
+        rank = _get_rank()
+        logger.info(f"Distributed training detected: rank={rank}, world_size={world_size}")
+        
+        # Adjust num_batches_per_epoch for distributed training
+        if num_batches_per_epoch is not None:
+            original_batches = num_batches_per_epoch
+            num_batches_per_epoch = num_batches_per_epoch // world_size
+            logger.info(f"Adjusted batches per epoch for rank {rank}: {original_batches} -> {num_batches_per_epoch}")
 
     if shuffle_buffer_length:
         dataset = PseudoShuffled(dataset, shuffle_buffer_length)
@@ -100,6 +165,16 @@ def as_stacked_batches(
 
     # Note: is_train needs to be provided but does not have an effect
     transformed_dataset = transform.apply(dataset, is_train=True)
+    
+    # Apply distributed sharding
+    if distributed and world_size > 1:
+        transformed_dataset = DistributedShardedIterable(
+            transformed_dataset, 
+            world_size=world_size, 
+            rank=rank
+        )
+        logger.info(f"Applied distributed sharding for rank {rank}/{world_size}")
+    
     return IterableSlice(transformed_dataset, num_batches_per_epoch)
 
 

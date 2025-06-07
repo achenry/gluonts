@@ -40,26 +40,53 @@ logger = logging.getLogger(__name__)
 def _detect_distributed_early() -> tuple[bool, int, int]:
     """
     Detect distributed training from environment variables.
-    Returns: (is_distributed, world_size, rank)
+    
+    Distinguishes between two scenarios:
+    1. Independent tuning workers (WORKER_RANK set) - NO data sharding
+    2. Cooperative training workers (DDP via srun) - YES data sharding
+    
+    Returns: (is_distributed_sharding_enabled, world_size, rank)
     """
-    # Check SLURM environment
+    # Check SLURM environment (most common for HPC)
     if "SLURM_NTASKS" in os.environ and "SLURM_PROCID" in os.environ:
         try:
             world_size = int(os.environ["SLURM_NTASKS"])
             rank = int(os.environ["SLURM_PROCID"])
-            return world_size > 1, world_size, rank
-        except (ValueError, KeyError):
-            pass
+            
+            # Only enable data sharding for cooperative DDP workers
+            # If WORKER_RANK is set, these are independent tuning workers
+            is_independent_worker = "WORKER_RANK" in os.environ
+            enable_sharding = world_size > 1 and not is_independent_worker
+            
+            if enable_sharding:
+                logger.info(f"Cooperative distributed training detected: rank={rank}, world_size={world_size} (data sharding enabled)")
+            elif world_size > 1 and is_independent_worker:
+                logger.info(f"Independent worker detected: SLURM_PROCID={rank}, WORKER_RANK={os.environ['WORKER_RANK']} (data sharding disabled)")
+            
+            return enable_sharding, world_size, rank
+        except (ValueError, KeyError) as e:
+            logger.warning(f"Failed to parse SLURM environment variables: {e}")
     
-    # Check PyTorch distributed environment variables
+    # Check PyTorch distributed environment variables (fallback)
     if "WORLD_SIZE" in os.environ and "RANK" in os.environ:
         try:
             world_size = int(os.environ["WORLD_SIZE"])
             rank = int(os.environ["RANK"])
-            return world_size > 1, world_size, rank
-        except (ValueError, KeyError):
-            pass
+            
+            # Same logic: disable sharding for independent workers
+            is_independent_worker = "WORKER_RANK" in os.environ
+            enable_sharding = world_size > 1 and not is_independent_worker
+            
+            if enable_sharding:
+                logger.info(f"PyTorch distributed training detected: rank={rank}, world_size={world_size} (data sharding enabled)")
+            elif world_size > 1 and is_independent_worker:
+                logger.info(f"Independent worker detected: RANK={rank}, WORKER_RANK={os.environ['WORKER_RANK']} (data sharding disabled)")
+            
+            return enable_sharding, world_size, rank
+        except (ValueError, KeyError) as e:
+            logger.warning(f"Failed to parse PyTorch environment variables: {e}")
     
+    # Single process or no distributed training detected
     return False, 1, 0
 
 
@@ -133,15 +160,17 @@ def as_stacked_batches(
     ----------
     distributed : bool, default True
         Whether to enable distributed training support. When True and running
-        in a distributed environment, data will be automatically sharded across
-        processes to avoid redundant processing.
+        in a cooperative distributed environment (DDP), data will be automatically 
+        sharded across processes. Independent workers (tuning mode) will not have 
+        data sharding applied.
     """
 
-    # Detect distributed training from environment variables
-    is_distributed_detected, world_size, rank = _detect_distributed_early()
+    # Detect distributed training mode (cooperative vs independent workers)
+    enable_sharding, world_size, rank = _detect_distributed_early()
     
-    if distributed and is_distributed_detected:
-        logger.info(f"Distributed training detected: rank={rank}, world_size={world_size}")
+    if distributed and enable_sharding:
+        # Cooperative distributed training - apply data sharding
+        logger.info(f"Applying distributed data sharding: rank={rank}, world_size={world_size}")
         
         # Adjust num_batches_per_epoch for distributed training
         if num_batches_per_epoch is not None:
@@ -149,8 +178,13 @@ def as_stacked_batches(
             num_batches_per_epoch = num_batches_per_epoch // world_size
             logger.info(f"Adjusted batches per epoch for rank {rank}: {original_batches} -> {num_batches_per_epoch}")
     else:
+        # Single process or independent workers - no data sharding
         world_size = 1
         rank = 0
+        if "WORKER_RANK" in os.environ:
+            logger.info(f"Independent worker mode: WORKER_RANK={os.environ['WORKER_RANK']} (full dataset access)")
+        else:
+            logger.info("Single process mode detected")
 
     if shuffle_buffer_length:
         dataset = PseudoShuffled(dataset, shuffle_buffer_length)
@@ -169,8 +203,8 @@ def as_stacked_batches(
     # Note: is_train needs to be provided but does not have an effect
     transformed_dataset = transform.apply(dataset, is_train=True)
     
-    # Apply distributed sharding
-    if distributed and world_size > 1:
+    # Apply distributed sharding only for cooperative workers
+    if distributed and enable_sharding and world_size > 1:
         transformed_dataset = DistributedShardedIterable(
             transformed_dataset, 
             world_size=world_size, 

@@ -96,10 +96,10 @@ class DistributedShardedIterable:
     Each process gets a different subset of the data.
     """
     
-    def __init__(self, iterable, world_size: int = None, rank: int = None):
+    def __init__(self, iterable, world_size: int = 1, rank: int = 0):
         self.iterable = iterable
-        self.world_size = world_size or _get_world_size()
-        self.rank = rank or _get_rank()
+        self.world_size = world_size
+        self.rank = rank
         
     def __iter__(self):
         """Yield every world_size-th item starting from rank."""
@@ -165,8 +165,11 @@ def as_stacked_batches(
         data sharding applied.
     """
 
-    # Detect distributed training mode (cooperative vs independent workers)
-    enable_sharding, world_size, rank = _detect_distributed_early()
+    # Only detect distributed training if distributed=True
+    if distributed:
+        enable_sharding, world_size, rank = _detect_distributed_early()
+    else:
+        enable_sharding, world_size, rank = False, 1, 0
     
     if distributed and enable_sharding:
         # Cooperative distributed training - apply data sharding

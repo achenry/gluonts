@@ -261,7 +261,7 @@ class PyTorchLightningEstimator(Estimator):
             # Remove any ModelCheckpoint callbacks when checkpointing is disabled
             final_callbacks = [cb for cb in custom_callbacks if not isinstance(cb, pl.callbacks.ModelCheckpoint)]
             logger.info("Checkpointing disabled: Removed all ModelCheckpoint callbacks")
-        if has_custom_checkpoint:
+        if has_custom_checkpoint and enable_checkpointing:
             checkpoint = [cb for cb in custom_callbacks if cb.__class__.__name__ == "ModelCheckpoint"][0]
             
         trainer = pl.Trainer(

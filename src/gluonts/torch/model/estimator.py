@@ -157,41 +157,81 @@ class PyTorchLightningEstimator(Estimator):
         ckpt_path: Optional[str] = None,
         **kwargs,
     ) -> TrainOutput:
+        # Check if this estimator wants to use PyTorch DataLoaders for distributed training
+        use_pytorch_dataloader = getattr(self, 'use_pytorch_dataloader', False)
+        
+        # Always create transformation (needed for predictor even in PyTorch path)
         transformation = self.create_transformation()
-         
-        with env._let(max_idle_transforms=max(len(training_data), 100)):
-            transformed_training_data: Dataset = transformation.apply(
-                training_data, is_train=True
-            )
-             
-            if cache_data:
-                transformed_training_data = Cached(transformed_training_data)
-
-            training_network = self.create_lightning_module()
-            # {p: t.shape for p, t in training_network.named_parameters()}
-            training_data_loader = self.create_training_data_loader(
-                transformed_training_data,
+        
+        # Create lightning module
+        training_network = self.create_lightning_module()
+        
+        if use_pytorch_dataloader:
+            # PyTorch DataLoader path for distributed training
+            logger.info("Using PyTorch DataLoader for distributed training")
+            
+            # Check if the estimator has PyTorch-specific data loader methods
+            if not hasattr(self, 'create_pytorch_training_data_loader'):
+                raise NotImplementedError(
+                    f"{self.__class__.__name__} must implement create_pytorch_training_data_loader "
+                    "when use_pytorch_dataloader=True"
+                )
+            
+            # For PyTorch path, training_data should be a file path or similar identifier
+            # Pass it directly to the PyTorch dataloader creation method
+            training_data_loader = self.create_pytorch_training_data_loader(
+                training_data,
                 training_network,
-                shuffle_buffer_length=shuffle_buffer_length,
+                **kwargs
             )
-            # x = sum(1 for _ in training_data_loader)
-        validation_data_loader = None
-
-        if validation_data is not None:
-            with env._let(max_idle_transforms=max(len(validation_data), 100)):
-                transformed_validation_data: Dataset = transformation.apply(
-                    validation_data, is_train=True
-                )
-                if cache_data:
-                    transformed_validation_data = Cached(
-                        transformed_validation_data
+            
+            validation_data_loader = None
+            if validation_data is not None:
+                if not hasattr(self, 'create_pytorch_validation_data_loader'):
+                    raise NotImplementedError(
+                        f"{self.__class__.__name__} must implement create_pytorch_validation_data_loader "
+                        "when use_pytorch_dataloader=True"
                     )
-
                 
-                validation_data_loader = self.create_validation_data_loader(
-                    transformed_validation_data,
+                validation_data_loader = self.create_pytorch_validation_data_loader(
+                    validation_data,
                     training_network,
+                    **kwargs
                 )
+        else:
+            # Original GluonTS data loading path
+            with env._let(max_idle_transforms=max(len(training_data), 100)):
+                transformed_training_data: Dataset = transformation.apply(
+                    training_data, is_train=True
+                )
+                 
+                if cache_data:
+                    transformed_training_data = Cached(transformed_training_data)
+
+                # {p: t.shape for p, t in training_network.named_parameters()}
+                training_data_loader = self.create_training_data_loader(
+                    transformed_training_data,
+                    training_network,
+                    shuffle_buffer_length=shuffle_buffer_length,
+                )
+                # x = sum(1 for _ in training_data_loader)
+            validation_data_loader = None
+
+            if validation_data is not None:
+                with env._let(max_idle_transforms=max(len(validation_data), 100)):
+                    transformed_validation_data: Dataset = transformation.apply(
+                        validation_data, is_train=True
+                    )
+                    if cache_data:
+                        transformed_validation_data = Cached(
+                            transformed_validation_data
+                        )
+
+                    
+                    validation_data_loader = self.create_validation_data_loader(
+                        transformed_validation_data,
+                        training_network,
+                    )
 
         if from_predictor is not None:
             training_network.load_state_dict(

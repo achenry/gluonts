@@ -12,6 +12,7 @@
 # permissions and limitations under the License.
 
 import logging
+import os
 from typing import Callable, Iterable, Optional
 
 import numpy as np
@@ -33,32 +34,33 @@ from gluonts.transform import (
     Valmap,
 )
 
-# INFO Distributed training support @boujuan
-try:
-    import torch.distributed as dist
-    TORCH_AVAILABLE = True
-except ImportError:
-    TORCH_AVAILABLE = False
-
 logger = logging.getLogger(__name__)
 
 
-def _is_distributed() -> bool:
-    if not TORCH_AVAILABLE:
-        return False
-    return dist.is_available() and dist.is_initialized()
-
-
-def _get_world_size() -> int:
-    if not _is_distributed():
-        return 1
-    return dist.get_world_size()
-
-
-def _get_rank() -> int:
-    if not _is_distributed():
-        return 0
-    return dist.get_rank()
+def _detect_distributed_early() -> tuple[bool, int, int]:
+    """
+    Detect distributed training from environment variables.
+    Returns: (is_distributed, world_size, rank)
+    """
+    # Check SLURM environment
+    if "SLURM_NTASKS" in os.environ and "SLURM_PROCID" in os.environ:
+        try:
+            world_size = int(os.environ["SLURM_NTASKS"])
+            rank = int(os.environ["SLURM_PROCID"])
+            return world_size > 1, world_size, rank
+        except (ValueError, KeyError):
+            pass
+    
+    # Check PyTorch distributed environment variables
+    if "WORLD_SIZE" in os.environ and "RANK" in os.environ:
+        try:
+            world_size = int(os.environ["WORLD_SIZE"])
+            rank = int(os.environ["RANK"])
+            return world_size > 1, world_size, rank
+        except (ValueError, KeyError):
+            pass
+    
+    return False, 1, 0
 
 
 class DistributedShardedIterable:
@@ -135,12 +137,10 @@ def as_stacked_batches(
         processes to avoid redundant processing.
     """
 
-    # Handle distributed training
-    world_size = 1
-    rank = 0
-    if distributed and _is_distributed():
-        world_size = _get_world_size()
-        rank = _get_rank()
+    # Detect distributed training from environment variables
+    is_distributed_detected, world_size, rank = _detect_distributed_early()
+    
+    if distributed and is_distributed_detected:
         logger.info(f"Distributed training detected: rank={rank}, world_size={world_size}")
         
         # Adjust num_batches_per_epoch for distributed training
@@ -148,6 +148,9 @@ def as_stacked_batches(
             original_batches = num_batches_per_epoch
             num_batches_per_epoch = num_batches_per_epoch // world_size
             logger.info(f"Adjusted batches per epoch for rank {rank}: {original_batches} -> {num_batches_per_epoch}")
+    else:
+        world_size = 1
+        rank = 0
 
     if shuffle_buffer_length:
         dataset = PseudoShuffled(dataset, shuffle_buffer_length)

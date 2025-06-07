@@ -238,19 +238,29 @@ class PyTorchLightningEstimator(Estimator):
                 from_predictor.network.state_dict()
             )
 
-        monitor = "train_loss" if validation_data is None else "val_loss"
-        checkpoint = pl.callbacks.ModelCheckpoint(
-            monitor=monitor, mode="min", verbose=True
-        )
-
+        # Check if checkpointing is disabled
+        enable_checkpointing = self.trainer_kwargs.get("enable_checkpointing", True)
+        
         custom_callbacks = self.trainer_kwargs.pop("callbacks", [])
 
         # @boujuan Check if a ModelCheckpoint is already provided in custom_callbacks
         has_custom_checkpoint = any(isinstance(cb, pl.callbacks.ModelCheckpoint) for cb in custom_callbacks)
         
+        # Create default checkpoint only if checkpointing is enabled and no custom checkpoint exists
+        checkpoint = None
+        if enable_checkpointing and not has_custom_checkpoint:
+            monitor = "train_loss" if validation_data is None else "val_loss"
+            checkpoint = pl.callbacks.ModelCheckpoint(
+                monitor=monitor, mode="min", verbose=True
+            )
+        
         # @boujuan Construct the final list of callbacks for the Trainer
-        # Only add the default checkpoint if no custom one was provided
-        final_callbacks = custom_callbacks if has_custom_checkpoint else [checkpoint] + custom_callbacks
+        if enable_checkpointing:
+            final_callbacks = custom_callbacks if has_custom_checkpoint else [checkpoint] + custom_callbacks
+        else:
+            # Remove any ModelCheckpoint callbacks when checkpointing is disabled
+            final_callbacks = [cb for cb in custom_callbacks if not isinstance(cb, pl.callbacks.ModelCheckpoint)]
+            logger.info("Checkpointing disabled: Removed all ModelCheckpoint callbacks")
         if has_custom_checkpoint:
             checkpoint = [cb for cb in custom_callbacks if cb.__class__.__name__ == "ModelCheckpoint"][0]
             

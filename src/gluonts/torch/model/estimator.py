@@ -280,7 +280,7 @@ class PyTorchLightningEstimator(Estimator):
         )
 
         # TODO HIGH this doesn't work for TACTIS...
-        if checkpoint.best_model_path != "":
+        if checkpoint is not None and checkpoint.best_model_path != "":
             logger.info(
                 f"Loading best model from {checkpoint.best_model_path}"
             )

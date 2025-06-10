@@ -14,7 +14,7 @@
 from typing import NamedTuple, Optional, Iterable, Dict, Any
 import logging
 
-
+import inspect
 import numpy as np
 # Use the newer namespace consistent with Lightning > v2.0
 import lightning.pytorch as pl
@@ -184,6 +184,7 @@ class PyTorchLightningEstimator(Estimator):
                 training_network,
                 **kwargs
             )
+            # x = next(iter(training_data_loader))
             
             validation_data_loader = None
             if validation_data is not None:
@@ -214,6 +215,8 @@ class PyTorchLightningEstimator(Estimator):
                     training_network,
                     shuffle_buffer_length=shuffle_buffer_length,
                 )
+                
+                # x = next(iter(training_data_loader))
                 # x = sum(1 for _ in training_data_loader)
             validation_data_loader = None
 
@@ -279,7 +282,6 @@ class PyTorchLightningEstimator(Estimator):
             ckpt_path=ckpt_path,
         )
 
-        # TODO HIGH this doesn't work for TACTIS...
         if checkpoint is not None and checkpoint.best_model_path != "":
             logger.info(
                 f"Loading best model from {checkpoint.best_model_path}"
@@ -295,7 +297,8 @@ class PyTorchLightningEstimator(Estimator):
             transformation=transformation,
             trained_net=best_model,
             trainer=trainer,
-            predictor=self.create_predictor(transformation, best_model, **kwargs), # CHANGE
+            predictor=self.create_predictor(transformation, best_model, 
+                                            **{k: kwargs[k] for k in kwargs if k in inspect.signature(PyTorchPredictor).parameters.keys()}), # CHANGE
         )
 
     @staticmethod

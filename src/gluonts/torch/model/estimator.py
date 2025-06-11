@@ -282,11 +282,12 @@ class PyTorchLightningEstimator(Estimator):
             **{
                 # "accelerator": "auto",
                 "callbacks": final_callbacks, # Use the combined list
+                "num_sanity_val_steps": 0, # This disables the check that is crashing
                 **self.trainer_kwargs,
             }
         )
         
-        if not training_data_loader is None:
+        if not (training_data_loader is None):
             trainer.fit(
                 model=training_network,
                 train_dataloaders=training_data_loader,

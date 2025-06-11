@@ -171,34 +171,41 @@ class PyTorchLightningEstimator(Estimator):
             logger.info("Using PyTorch DataLoader for distributed training")
             
             # Check if the estimator has PyTorch-specific data loader methods
-            if not hasattr(self, 'create_pytorch_training_data_loader'):
+            if not hasattr(self, 'create_pytorch_training_data_loader') and not hasattr(self, 'create_pytorch_data_module'):
                 raise NotImplementedError(
-                    f"{self.__class__.__name__} must implement create_pytorch_training_data_loader "
+                    f"{self.__class__.__name__} must implement create_pytorch_training_data_loader OR create_pytorch_data_module "
                     "when use_pytorch_dataloader=True"
                 )
             
+            training_data_loader = None
             # For PyTorch path, training_data should be a file path or similar identifier
             # Pass it directly to the PyTorch dataloader creation method
-            training_data_loader = self.create_pytorch_training_data_loader(
-                training_data,
-                training_network,
-                **kwargs
-            )
-            # x = next(iter(training_data_loader))
+            # training_data_loader = self.create_pytorch_training_data_loader(
+            #     training_data,
+            #     training_network,
+            #     **kwargs
+            # )
+            
             
             validation_data_loader = None
             if validation_data is not None:
-                if not hasattr(self, 'create_pytorch_validation_data_loader'):
+                if not hasattr(self, 'create_pytorch_validation_data_loader') and not hasattr(self, 'create_pytorch_data_module'):
                     raise NotImplementedError(
-                        f"{self.__class__.__name__} must implement create_pytorch_validation_data_loader "
+                        f"{self.__class__.__name__} must implement create_pytorch_validation_data_loader OR create_pytorch_data_module "
                         "when use_pytorch_dataloader=True"
                     )
                 
-                validation_data_loader = self.create_pytorch_validation_data_loader(
-                    validation_data,
-                    training_network,
-                    **kwargs
-                )
+                # validation_data_loader = self.create_pytorch_validation_data_loader(
+                #     validation_data,
+                #     training_network,
+                #     **kwargs
+                # )
+                
+            data_module = self.create_pytorch_data_module(
+                train_data_path=training_data,
+                val_data_path=validation_data,
+                **kwargs
+            )
         else:
             # Original GluonTS data loading path
             with env._let(max_idle_transforms=max(len(training_data), 100)):
@@ -277,12 +284,19 @@ class PyTorchLightningEstimator(Estimator):
             }
         )
         
-        trainer.fit(
-            model=training_network,
-            train_dataloaders=training_data_loader,
-            val_dataloaders=validation_data_loader,
-            ckpt_path=ckpt_path,
-        )
+        if not training_data_loader is None:
+            trainer.fit(
+                model=training_network,
+                train_dataloaders=training_data_loader,
+                val_dataloaders=validation_data_loader,
+                ckpt_path=ckpt_path,
+            )
+        else:
+            trainer.fit(
+                model=training_network,
+                datamodule=data_module,
+                ckpt_path=ckpt_path,
+            )
 
         if checkpoint is not None and checkpoint.best_model_path != "":
             logger.info(

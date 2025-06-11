@@ -267,6 +267,8 @@ class PyTorchLightningEstimator(Estimator):
         if has_custom_checkpoint and enable_checkpointing:
             checkpoint = [cb for cb in custom_callbacks if cb.__class__.__name__ == "ModelCheckpoint"][0]
             
+        logging.info(f"Final Trainer callbacks: {final_callbacks}")
+        logging.info(f"Final Trainer kwargs: {self.trainer_kwargs}")
         trainer = pl.Trainer(
             **{
                 # "accelerator": "auto",

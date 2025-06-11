@@ -201,6 +201,8 @@ class PyTorchLightningEstimator(Estimator):
                 #     **kwargs
                 # )
                 
+            logging.info(f"Creating LightningDataModule for distributed training with kwargs {kwargs}.")    
+                
             data_module = self.create_pytorch_data_module(
                 train_data_path=training_data,
                 val_data_path=validation_data,

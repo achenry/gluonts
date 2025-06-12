@@ -282,7 +282,6 @@ class PyTorchLightningEstimator(Estimator):
             **{
                 # "accelerator": "auto",
                 "callbacks": final_callbacks, # Use the combined list
-                "num_sanity_val_steps": 0, # This disables the check that is crashing
                 **self.trainer_kwargs,
             }
         )

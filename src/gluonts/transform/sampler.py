@@ -14,6 +14,7 @@
 from typing import Tuple
 
 import numpy as np
+import polars as pl
 
 from gluonts.dataset.stat import ScaleHistogram
 from gluonts.pydantic import BaseModel
@@ -35,10 +36,11 @@ class InstanceSampler(BaseModel):
     class Config:
         arbitrary_types_allowed = True
 
-    def _get_bounds(self, ts: np.ndarray) -> Tuple[int, int]:
+    def _get_bounds(self, ts: np.ndarray | pl.DataFrame) -> Tuple[int, int]:
+        axis = 0 if isinstance(ts, pl.DataFrame) else self.axis
         return (
             self.min_past,
-            ts.shape[self.axis] - self.min_future,
+            ts.shape[axis] - self.min_future,
         )
 
     def __call__(self, ts: np.ndarray) -> np.ndarray:

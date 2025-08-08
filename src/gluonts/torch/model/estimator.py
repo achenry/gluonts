@@ -208,6 +208,7 @@ class PyTorchLightningEstimator(Estimator):
                 val_data_path=validation_data,
                 **kwargs
             )
+            # next(data_module.train_dataloader())  # Preload validation data to ensure it works
         else:
             # Original GluonTS data loading path
             with env._let(max_idle_transforms=max(len(training_data), 100)):

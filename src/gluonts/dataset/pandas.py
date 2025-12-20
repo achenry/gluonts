@@ -23,7 +23,7 @@ import pandas as pd
 
 
 import polars as pl
-import polars.polars as plr
+import polars._plr as plr
 import polars.selectors as cs
 from polars._typing import ConcatMethod
 from polars._utils.wrap import wrap_ldf

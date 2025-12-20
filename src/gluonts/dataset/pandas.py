@@ -746,8 +746,8 @@ class IterableLazyFrame:
     def dtype(self):
         return list(self._df.select(cs.float()).collect_schema().values())[0]
     
-    # def __len__(self):
-    #     return self.length
+    def __len__(self):
+        return self.length
 
 def concat_lazyframes(items: Iterable[IterableLazyFrame],
                         *,
